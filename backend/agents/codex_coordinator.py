@@ -22,6 +22,7 @@ from backend.agents.coordinator_core import (
 from backend.agents.coordinator_loop import build_deps, run_event_loop
 from backend.config import Settings
 from backend.deps import CoordinatorDeps
+from backend.executables import resolve_executable
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +149,9 @@ class CodexCoordinator:
         self._turn_error: str | None = None
 
     async def start(self) -> None:
+        codex_executable = resolve_executable("codex", env_var="CODEX_EXECUTABLE")
         self._proc = await asyncio.create_subprocess_exec(
-            "codex", "app-server",
+            codex_executable, "app-server",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,

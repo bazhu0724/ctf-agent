@@ -22,6 +22,7 @@ from typing import Any
 
 from backend.cost_tracker import CostTracker
 from backend.ctfd import CTFdClient
+from backend.executables import resolve_executable
 from backend.loop_detect import LoopDetector
 from backend.models import model_id_from_spec, supports_vision
 from backend.output_types import solver_output_json_schema
@@ -183,8 +184,9 @@ class CodexSolver:
             has_named_tools=True,
         )
 
+        codex_executable = resolve_executable("codex", env_var="CODEX_EXECUTABLE")
         self._proc = await asyncio.create_subprocess_exec(
-            "codex", "app-server",
+            codex_executable, "app-server",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,

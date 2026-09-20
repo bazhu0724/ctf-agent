@@ -167,6 +167,10 @@ All settings can also be passed as environment variables or CLI flags.
 - `codex` CLI (for Codex solver/coordinator)
 - `claude` CLI (bundled with claude-agent-sdk)
 
+The Codex executable is resolved to an absolute path before launch, including the
+versioned location used by Codex Desktop on Windows. Set `CODEX_EXECUTABLE` to an
+explicit executable path when using a custom installation.
+
 ## Acknowledgements
 
 - [es3n1n/Eruditus](https://github.com/es3n1n/Eruditus) — CTFd interaction and HTML helpers in `pull_challenges.py`
