@@ -116,8 +116,12 @@ Each solver gets an isolated Docker container pre-loaded with CTF tools:
 
 - **Multi-model racing** — multiple AI models attack each challenge simultaneously
 - **Auto-spawn** — new challenges detected and attacked automatically
+- **Dynamic task pool** — priority queue backfills reusable challenge slots as work finishes
+- **Task registry** — category, workspace path, attempts, and lifecycle state are visible centrally
+- **Typed event bus** — queue/start/help/block/solve transitions are delivered consistently
 - **Coordinator LLM** — reads solver traces, crafts targeted technical guidance
 - **Cross-solver insights** — findings shared between models via message bus
+- **Flag guardrails** — local placeholder/control-character checks plus deduplicated CTFd verification
 - **Docker sandboxes** — isolated containers with full CTF tooling
 - **Operator messaging** — send hints to running solvers mid-competition
 

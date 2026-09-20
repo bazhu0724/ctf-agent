@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING, Any
 
 from backend.cost_tracker import CostTracker
 from backend.ctfd import CTFdClient
+from backend.message_bus import CoordinatorEventBus
 from backend.sandbox import DockerSandbox
+from backend.task_registry import ChallengeRegistry
 
 if TYPE_CHECKING:
     from backend.message_bus import ChallengeMessageBus
@@ -55,3 +57,5 @@ class CoordinatorDeps:
     results: dict[str, dict] = field(default_factory=dict)
     challenge_dirs: dict[str, str] = field(default_factory=dict)
     challenge_metas: dict[str, Any] = field(default_factory=dict)
+    task_registry: ChallengeRegistry = field(default_factory=ChallengeRegistry)
+    event_bus: CoordinatorEventBus = field(default_factory=CoordinatorEventBus)

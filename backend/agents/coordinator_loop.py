@@ -13,9 +13,11 @@ from backend.config import Settings
 from backend.cost_tracker import CostTracker
 from backend.ctfd import CTFdClient
 from backend.deps import CoordinatorDeps
+from backend.message_bus import CoordinatorEvent, CoordinatorEventBus, CoordinatorEventType
 from backend.models import DEFAULT_MODELS
 from backend.poller import CTFdPoller
 from backend.prompts import ChallengeMeta
+from backend.task_registry import ChallengeRegistry, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,8 @@ def build_deps(
         max_concurrent_challenges=getattr(settings, "max_concurrent_challenges", 10),
         challenge_dirs=challenge_dirs or {},
         challenge_metas=challenge_metas or {},
+        task_registry=ChallengeRegistry(),
+        event_bus=CoordinatorEventBus(),
     )
 
     # Pre-load already-pulled challenges
@@ -62,6 +66,13 @@ def build_deps(
             if meta.name not in deps.challenge_dirs:
                 deps.challenge_dirs[meta.name] = str(d)
                 deps.challenge_metas[meta.name] = meta
+            deps.task_registry.register(
+                meta.name,
+                category=meta.category,
+                path=str(d),
+                value=meta.value,
+                solves=meta.solves,
+            )
 
     return ctfd, cost_tracker, deps
 
@@ -96,6 +107,18 @@ async def run_event_loop(
     )
 
     unsolved = poller.known_challenges - poller.known_solved
+    for name in poller.known_challenges:
+        details = poller.challenge_details.get(name, {})
+        deps.task_registry.register(
+            name,
+            category=details.get("category", ""),
+            value=details.get("value", 0),
+            solves=details.get("solves", 0),
+        )
+        if name in poller.known_solved:
+            deps.task_registry.finish(name, TaskStatus.SOLVED)
+        else:
+            deps.task_registry.queue(name)
     initial_msg = (
         f"CTF is LIVE. {len(poller.known_challenges)} challenges, "
         f"{len(poller.known_solved)} solved.\n"
@@ -125,13 +148,26 @@ async def run_event_loop(
                     if not swarm.cancel_event.is_set():
                         swarm.kill()
                         logger.info("Auto-killed swarm for: %s", evt.challenge_name)
+                if evt.kind == "challenge_solved":
+                    deps.task_registry.finish(evt.challenge_name, TaskStatus.SOLVED)
+                elif evt.kind == "new_challenge":
+                    deps.task_registry.register(
+                        evt.challenge_name,
+                        category=evt.details.get("category", ""),
+                        value=evt.details.get("value", 0),
+                        solves=evt.details.get("solves", 0),
+                    )
+                    deps.task_registry.queue(evt.challenge_name)
+                    await deps.event_bus.publish(CoordinatorEvent(
+                        CoordinatorEventType.TASK_QUEUED,
+                        evt.challenge_name,
+                        source="poller",
+                    ))
 
             parts: list[str] = []
             for evt in events:
                 if evt.kind == "new_challenge":
                     parts.append(f"NEW CHALLENGE: '{evt.challenge_name}' appeared. Spawn a swarm.")
-                    # Auto-spawn for new challenges
-                    await _auto_spawn_one(deps, evt.challenge_name)
                 elif evt.kind == "challenge_solved":
                     parts.append(f"SOLVED: '{evt.challenge_name}' — swarm auto-killed.")
 
@@ -140,6 +176,16 @@ async def run_event_loop(
                 if task.done():
                     parts.append(f"SOLVER FINISHED: Swarm for '{name}' completed. Check results or retry.")
                     deps.swarm_tasks.pop(name, None)
+
+            # Work-conserving scheduling: every freed challenge slot is reused.
+            await _fill_available_slots(deps)
+
+            for event in deps.event_bus.drain():
+                payload = f" {json.dumps(event.payload, ensure_ascii=False)}" if event.payload else ""
+                parts.append(
+                    f"TASK EVENT: {event.kind.value} challenge='{event.challenge}' "
+                    f"source='{event.source}'{payload}"
+                )
 
             # Drain solver-to-coordinator messages
             while True:
@@ -208,26 +254,51 @@ async def run_event_loop(
     }
 
 
-async def _auto_spawn_one(deps: CoordinatorDeps, challenge_name: str) -> None:
+async def _auto_spawn_one(deps: CoordinatorDeps, challenge_name: str) -> bool:
     """Auto-spawn a swarm for a single challenge if not already running."""
+    existing_task = deps.swarm_tasks.get(challenge_name)
+    if challenge_name in deps.swarms and existing_task and not existing_task.done():
+        return False
     if challenge_name in deps.swarms:
-        return
+        deps.swarms.pop(challenge_name, None)
+        deps.swarm_tasks.pop(challenge_name, None)
     active = sum(1 for t in deps.swarm_tasks.values() if not t.done())
     if active >= deps.max_concurrent_challenges:
-        return
+        deps.task_registry.queue(challenge_name)
+        return False
     try:
         from backend.agents.coordinator_core import do_spawn_swarm
         result = await do_spawn_swarm(deps, challenge_name)
         logger.info(f"Auto-spawn {challenge_name}: {result[:100]}")
+        started = deps.task_registry.register(challenge_name).status == TaskStatus.RUNNING
+        if not started and deps.task_registry.register(challenge_name).status == TaskStatus.QUEUED:
+            deps.task_registry.finish(challenge_name, TaskStatus.FAILED, result)
+        return started
     except Exception as e:
         logger.warning(f"Auto-spawn failed for {challenge_name}: {e}")
+        deps.task_registry.finish(challenge_name, TaskStatus.FAILED, str(e))
+        return False
 
 
 async def _auto_spawn_unsolved(deps: CoordinatorDeps, poller) -> None:
     """Auto-spawn swarms for all unsolved challenges that don't have active swarms."""
     unsolved = poller.known_challenges - poller.known_solved
-    for name in sorted(unsolved):
-        await _auto_spawn_one(deps, name)
+    for name in unsolved:
+        deps.task_registry.queue(name)
+    await _fill_available_slots(deps)
+
+
+async def _fill_available_slots(deps: CoordinatorDeps) -> None:
+    """Fill idle challenge slots from the priority queue."""
+    while True:
+        active = sum(1 for task in deps.swarm_tasks.values() if not task.done())
+        if active >= deps.max_concurrent_challenges:
+            return
+        task = deps.task_registry.next_queued()
+        if task is None:
+            return
+        if not await _auto_spawn_one(deps, task.name):
+            return
 
 
 async def _start_msg_server(inbox: asyncio.Queue, port: int = 0) -> asyncio.Server | None:

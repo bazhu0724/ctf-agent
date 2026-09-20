@@ -38,7 +38,12 @@ def _setup_logging(verbose: bool = False) -> None:
 @click.option("--no-submit", is_flag=True, help="Dry run — don't submit flags")
 @click.option("--coordinator-model", default=None, help="Model for coordinator (default: claude-opus-4-6)")
 @click.option("--coordinator", default="claude", type=click.Choice(["claude", "codex"]), help="Coordinator backend")
-@click.option("--max-challenges", default=10, type=int, help="Max challenges solved concurrently")
+@click.option(
+    "--max-challenges",
+    default=10,
+    type=int,
+    help="Reusable concurrent challenge slots; queued challenges backfill freed slots",
+)
 @click.option("--msg-port", default=0, type=int, help="Operator message port (0 = auto)")
 @click.option("-v", "--verbose", is_flag=True, help="Verbose logging")
 def main(

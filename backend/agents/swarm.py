@@ -11,7 +11,13 @@ from typing import TYPE_CHECKING
 from backend.agents.solver import Solver
 from backend.cost_tracker import CostTracker
 from backend.ctfd import CTFdClient
-from backend.message_bus import ChallengeMessageBus
+from backend.flag_validation import validate_flag_candidate
+from backend.message_bus import (
+    ChallengeMessageBus,
+    CoordinatorEvent,
+    CoordinatorEventBus,
+    CoordinatorEventType,
+)
 from backend.models import DEFAULT_MODELS, provider_from_spec
 from backend.prompts import ChallengeMeta
 from backend.solver_base import (
@@ -55,6 +61,7 @@ class ChallengeSwarm:
     model_specs: list[str] = field(default_factory=lambda: list(DEFAULT_MODELS))
     no_submit: bool = False
     coordinator_inbox: asyncio.Queue | None = None
+    coordinator_event_bus: CoordinatorEventBus | None = None
 
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
     solvers: dict[str, SolverProtocol] = field(default_factory=dict)
@@ -120,6 +127,13 @@ class ChallengeSwarm:
                 self.coordinator_inbox.put_nowait(
                     f"[{self.meta.name}/{model_spec}] {message}"
                 )
+            if self.coordinator_event_bus:
+                await self.coordinator_event_bus.publish(CoordinatorEvent(
+                    CoordinatorEventType.HELP_REQUEST,
+                    self.meta.name,
+                    source=model_spec,
+                    payload={"message": message[:1000]},
+                ))
         return _notify
 
     def _create_pydantic_solver(self, model_spec: str, sandbox=None, owns_sandbox: bool | None = None) -> Solver:
@@ -158,7 +172,16 @@ class ChallengeSwarm:
             if self.confirmed_flag:
                 return f"ALREADY SOLVED — flag already confirmed: {self.confirmed_flag}", True
 
-            normalized = flag.strip()
+            valid, reason, normalized = validate_flag_candidate(flag)
+            if not valid:
+                return f"REJECTED — {reason}.", False
+            if self.coordinator_event_bus:
+                await self.coordinator_event_bus.publish(CoordinatorEvent(
+                    CoordinatorEventType.FLAG_CANDIDATE,
+                    self.meta.name,
+                    source=model_spec,
+                    payload={"candidate_length": len(normalized)},
+                ))
 
             # Dedup exact flags across all models
             if normalized in self._submitted_flags:
