@@ -39,8 +39,6 @@ logger = logging.getLogger(__name__)
 # Quota fallback: map subscription-backed providers to API-backed equivalents
 QUOTA_FALLBACK: dict[str, str] = {
     "claude-sdk/claude-opus-4-6": "bedrock/us.anthropic.claude-opus-4-6-v1",
-    "codex/gpt-5.4": "azure/gpt-5.4",
-    "codex/gpt-5.4-mini": "azure/gpt-5.4-mini",
     "codex/gpt-5.3-codex-spark": "zen/gpt-5.3-codex-spark",
 }
 

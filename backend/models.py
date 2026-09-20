@@ -10,6 +10,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.models.bedrock import BedrockConverseModel, BedrockModelSettings
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
+from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.bedrock import BedrockProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -22,8 +23,7 @@ if TYPE_CHECKING:
 DEFAULT_MODELS: list[str] = [
     "claude-sdk/claude-opus-4-6/medium",
     "claude-sdk/claude-opus-4-6/max",
-    "codex/gpt-5.4",
-    "codex/gpt-5.4-mini",
+    "codex/gpt-5.6-sol",
     "codex/gpt-5.3-codex",
 ]
 
@@ -31,8 +31,7 @@ DEFAULT_MODELS: list[str] = [
 CONTEXT_WINDOWS: dict[str, int] = {
     "us.anthropic.claude-opus-4-6-v1": 1_000_000,
     "claude-opus-4-6": 1_000_000,
-    "gpt-5.4": 1_000_000,
-    "gpt-5.4-mini": 400_000,
+    "gpt-5.6-sol": 1_000_000,
     "gpt-5.3-codex": 1_000_000,
     "gpt-5.3-codex-spark": 128_000,
     "gemini-3-flash-preview": 1_000_000,
@@ -45,8 +44,7 @@ CONTEXT_WINDOWS: dict[str, int] = {
 VISION_MODELS: set[str] = {
     "us.anthropic.claude-opus-4-6-v1",
     "claude-opus-4-6",
-    "gpt-5.4",
-    "gpt-5.4-mini",
+    "gpt-5.6-sol",
     "gemini-3-flash-preview",
 }
 
@@ -97,6 +95,9 @@ def resolve_model(spec: str, settings: Settings) -> Model:
                     base_url=settings.deepseek_base_url,
                     api_key=settings.deepseek_api_key,
                 ),
+                # DeepSeek thinking mode rejects tool_choice="required". Pydantic AI
+                # will use "auto" instead while preserving the same callable tools.
+                profile=OpenAIModelProfile(openai_supports_tool_choice_required=False),
             )
         case "google":
             return GoogleModel(

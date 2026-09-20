@@ -82,7 +82,7 @@ uv run ctf-solve \
 # Claude SDK coordinator (default)
 uv run ctf-solve --coordinator claude ...
 
-# Codex coordinator (GPT-5.4 via JSON-RPC)
+# Codex coordinator (GPT-5.6 Sol via JSON-RPC)
 uv run ctf-solve --coordinator codex ...
 ```
 
@@ -94,8 +94,7 @@ Default model lineup (configurable in `backend/models.py`):
 |-------|----------|-------|
 | Claude Opus 4.6 (medium) | Claude SDK | Balanced speed/quality |
 | Claude Opus 4.6 (max) | Claude SDK | Deep reasoning |
-| GPT-5.4 | Codex | Best overall solver |
-| GPT-5.4-mini | Codex | Fast, good for easy challenges |
+| GPT-5.6 Sol | Codex | Default Codex coordinator and solver |
 | GPT-5.3-codex | Codex | Reasoning model (xhigh effort) |
 
 DeepSeek's OpenAI-compatible API is also supported. For a lean setup that uses a
@@ -110,6 +109,9 @@ uv run ctf-solve \
   --models deepseek/deepseek-flash \
   ...
 ```
+
+DeepSeek thinking models are sent `tool_choice=auto`; this keeps bash, file, and
+submission tools available without using the unsupported `required` mode.
 
 Increase `--max-challenges` to 5 after validating local Docker and API capacity.
 
