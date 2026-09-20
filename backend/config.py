@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     gemini_api_key: str = ""
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
 
     # Provider-specific (optional, for Bedrock/Azure/Zen fallback)
     aws_region: str = "us-east-1"

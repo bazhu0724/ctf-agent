@@ -98,6 +98,21 @@ Default model lineup (configurable in `backend/models.py`):
 | GPT-5.4-mini | Codex | Fast, good for easy challenges |
 | GPT-5.3-codex | Codex | Reasoning model (xhigh effort) |
 
+DeepSeek's OpenAI-compatible API is also supported. For a lean setup that uses a
+ChatGPT-authenticated Codex coordinator and two DeepSeek solvers per challenge:
+
+```bash
+export DEEPSEEK_API_KEY=your_key_here
+uv run ctf-solve \
+  --coordinator codex \
+  --max-challenges 3 \
+  --models deepseek/deepseek-v4-pro \
+  --models deepseek/deepseek-flash \
+  ...
+```
+
+Increase `--max-challenges` to 5 after validating local Docker and API capacity.
+
 ## Sandbox Tooling
 
 Each solver gets an isolated Docker container pre-loaded with CTF tools:
@@ -147,7 +162,8 @@ All settings can also be passed as environment variables or CLI flags.
 
 - Python 3.14+
 - Docker
-- API keys for at least one provider (Anthropic, OpenAI, Google)
+- API credentials for at least one solver provider (Anthropic, OpenAI, Google, DeepSeek)
+- A ChatGPT or API-key login for Codex-backed solvers/coordinators
 - `codex` CLI (for Codex solver/coordinator)
 - `claude` CLI (bundled with claude-agent-sdk)
 
