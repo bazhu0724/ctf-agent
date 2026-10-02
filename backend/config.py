@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     sandbox_image: str = "ctf-sandbox"
     max_concurrent_challenges: int = 10
     split_models_across_challenges: bool = True
+    prefetch_all_challenges: bool = True
+    challenge_prefetch_concurrency: int = 6
     max_attempts_per_challenge: int = 3
     container_memory_limit: str = "16g"
     generate_writeups: bool = True

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -194,18 +195,25 @@ class CTFPlusClient(CTFdClient):
 
     async def fetch_all_challenges(self) -> list[dict[str, Any]]:
         stubs = await self.fetch_challenge_stubs()
-        details: list[dict[str, Any]] = []
         team_id = await self._self_team_id()
-        for stub in stubs:
-            detail = await self._problem_detail(stub["id"], team_id)
+        sem = asyncio.Semaphore(8)
+
+        async def _detail_for(stub: dict[str, Any]) -> dict[str, Any]:
+            async with sem:
+                try:
+                    detail = await self._problem_detail(stub["id"], team_id)
+                except Exception as exc:
+                    logger.warning("Could not fetch CTF+ detail for %s: %s", stub.get("name"), exc)
+                    detail = stub.get("_ctfplus") or {}
             merged = dict(stub)
             merged["_ctfplus_detail"] = detail
             if isinstance(detail, dict):
                 merged["description"] = self._doc_text(
                     detail.get("description") or detail.get("content") or merged.get("description")
                 )
-            details.append(merged)
-        return details
+            return merged
+
+        return list(await asyncio.gather(*(_detail_for(stub) for stub in stubs)))
 
     async def fetch_solved_names(self) -> set[str]:
         stubs = await self.fetch_challenge_stubs()

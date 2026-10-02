@@ -47,6 +47,8 @@ class CoordinatorDeps:
     no_submit: bool = False
     max_concurrent_challenges: int = 10
     split_models_across_challenges: bool = True
+    prefetch_all_challenges: bool = True
+    challenge_prefetch_concurrency: int = 6
     allowed_categories: set[str] = field(default_factory=set)
 
     msg_port: int = 0  # 0 = auto-pick free port

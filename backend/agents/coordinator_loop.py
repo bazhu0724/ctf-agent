@@ -50,6 +50,8 @@ def build_deps(
         no_submit=no_submit,
         max_concurrent_challenges=getattr(settings, "max_concurrent_challenges", 10),
         split_models_across_challenges=getattr(settings, "split_models_across_challenges", True),
+        prefetch_all_challenges=getattr(settings, "prefetch_all_challenges", True),
+        challenge_prefetch_concurrency=getattr(settings, "challenge_prefetch_concurrency", 6),
         allowed_categories={c.casefold() for c in (allowed_categories or set())},
         challenge_dirs=challenge_dirs or {},
         challenge_metas=challenge_metas or {},
@@ -295,6 +297,14 @@ async def _auto_spawn_unsolved(deps: CoordinatorDeps, poller) -> None:
     }
     for name in unsolved:
         deps.task_registry.queue(name)
+    if getattr(deps, "prefetch_all_challenges", True) and unsolved:
+        try:
+            from backend.agents.coordinator_core import do_prefetch_challenges
+
+            result = await do_prefetch_challenges(deps, unsolved)
+            logger.info(result)
+        except Exception as exc:
+            logger.warning("Challenge prefetch failed; falling back to on-demand pulls: %s", exc)
     await _fill_available_slots(deps)
 
 

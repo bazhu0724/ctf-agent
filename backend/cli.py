@@ -47,6 +47,8 @@ def _setup_logging(verbose: bool = False) -> None:
     is_flag=True,
     help="Run every configured model on every challenge instead of splitting models across challenges",
 )
+@click.option("--no-prefetch", is_flag=True, help="Disable startup prefetch of all unsolved challenge metadata/files")
+@click.option("--prefetch-concurrency", default=6, type=int, help="Concurrent challenge pulls during startup prefetch")
 @click.option("--challenge", default=None, help="Solve a single challenge directory")
 @click.option("--category", multiple=True, help="Coordinator category filter (repeatable)")
 @click.option("--challenges-dir", default="challenges", help="Directory for challenge files")
@@ -77,6 +79,8 @@ def main(
     image: str,
     models: tuple[str, ...],
     race_models: bool,
+    no_prefetch: bool,
+    prefetch_concurrency: int,
     challenge: str | None,
     category: tuple[str, ...],
     challenges_dir: str,
@@ -110,6 +114,8 @@ def main(
         settings.ctfplus_problem_bank_id = problem_bank_id
     settings.max_concurrent_challenges = max_challenges
     settings.split_models_across_challenges = not race_models
+    settings.prefetch_all_challenges = not no_prefetch
+    settings.challenge_prefetch_concurrency = prefetch_concurrency
     settings.writeups_dir = writeups_dir
     settings.generate_writeups = not no_writeups
 
@@ -126,6 +132,7 @@ def main(
             console.print(f"  Problem bank ID: {settings.ctfplus_problem_bank_id}")
     console.print(f"  Models: {', '.join(model_specs)}")
     console.print(f"  Model assignment: {'race' if race_models else 'split'}")
+    console.print(f"  Prefetch: {'disabled' if no_prefetch else f'concurrency={prefetch_concurrency}'}")
     console.print(f"  Image: {settings.sandbox_image}")
     console.print(f"  Max challenges: {max_challenges}")
     console.print(f"  Write-ups: {writeups_dir if not no_writeups else 'disabled'}")
@@ -151,7 +158,7 @@ async def _run_single(
     from backend.ret2shell import create_competition_client
     from backend.sandbox import cleanup_orphan_containers, configure_semaphore
 
-    max_containers = max_challenges * len(model_specs)
+    max_containers = max(1, len(model_specs))
     configure_semaphore(max_containers)
     await cleanup_orphan_containers()
 
@@ -214,7 +221,8 @@ async def _run_coordinator(
     """Run the full coordinator (continuous until Ctrl+C)."""
     from backend.sandbox import cleanup_orphan_containers, configure_semaphore
 
-    max_containers = max_challenges * len(model_specs)
+    split_models = getattr(settings, "split_models_across_challenges", True)
+    max_containers = max_challenges if split_models else max_challenges * len(model_specs)
     configure_semaphore(max_containers)
     await cleanup_orphan_containers()
     console.print(f"[bold]Starting coordinator ({coordinator_backend}, Ctrl+C to stop)...[/bold]\n")

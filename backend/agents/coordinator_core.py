@@ -17,13 +17,57 @@ from backend.task_registry import TaskStatus
 logger = logging.getLogger(__name__)
 
 
-def select_model_specs_for_challenge(deps: CoordinatorDeps, challenge_name: str) -> list[str]:
+MODEL_CATEGORY_PREFERENCES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (("crypto", "cryptography", "misc", "forensics", "stego", "osint", "ai", "ml"), ("deepseek/deepseek-flash",)),
+    (("web", "pwn", "binary", "reverse", "reversing", "re"), ("codex/gpt-5.5",)),
+)
+
+OFFLINE_FRIENDLY_CATEGORIES = {
+    "crypto",
+    "cryptography",
+    "misc",
+    "forensics",
+    "stego",
+    "osint",
+    "reverse",
+    "reversing",
+    "re",
+    "ai",
+    "ml",
+}
+
+
+def _category_preferences(category: str, model_specs: list[str]) -> list[str]:
+    category_text = category.casefold()
+    for needles, preferred_specs in MODEL_CATEGORY_PREFERENCES:
+        if any(needle in category_text for needle in needles):
+            preferred = [spec for spec in preferred_specs if spec in model_specs]
+            if preferred:
+                return preferred
+    return []
+
+
+def _active_model_loads(deps: CoordinatorDeps, model_specs: list[str]) -> dict[str, int]:
+    loads = {spec: 0 for spec in model_specs}
+    for swarm in getattr(deps, "swarms", {}).values():
+        for spec in getattr(swarm, "model_specs", []):
+            if spec in loads:
+                loads[spec] += 1
+    return loads
+
+
+def select_model_specs_for_challenge(
+    deps: CoordinatorDeps,
+    challenge_name: str,
+    category: str = "",
+) -> list[str]:
     """Choose solver models for a challenge.
 
     By default the coordinator assigns one configured model per challenge in a
-    round-robin schedule so GPT-5.5 and DeepSeek can work on different problems
-    instead of duplicating effort.  Set ``split_models_across_challenges`` false
-    to restore the old race mode where every model attacks every challenge.
+    load-balanced split schedule so GPT-5.5 and DeepSeek can work on different
+    problems instead of duplicating effort.  Set
+    ``split_models_across_challenges`` false to restore the old race mode where
+    every model attacks every challenge.
     """
     model_specs = list(deps.model_specs)
     if not model_specs:
@@ -39,10 +83,57 @@ def select_model_specs_for_challenge(deps: CoordinatorDeps, challenge_name: str)
         return list(assignments[challenge_name])
 
     cursor = getattr(deps, "model_assignment_cursor", 0)
-    chosen = [model_specs[cursor % len(model_specs)]]
+    loads = _active_model_loads(deps, model_specs)
+    min_load = min(loads.values())
+    candidates = [spec for spec in model_specs if loads[spec] == min_load]
+    preferred = [spec for spec in _category_preferences(category, model_specs) if spec in candidates]
+    pool = preferred or candidates
+    chosen = [pool[cursor % len(pool)]]
     assignments[challenge_name] = chosen
     deps.model_assignment_cursor = cursor + 1
     return list(chosen)
+
+
+def can_start_without_endpoint(meta: ChallengeMeta, challenge_dir: str) -> bool:
+    """Return whether offline/local analysis is useful without a live endpoint."""
+    category = (meta.category or "").casefold()
+    if any(key in category for key in OFFLINE_FRIENDLY_CATEGORIES):
+        return True
+    dist_dir = Path(challenge_dir) / "distfiles"
+    if dist_dir.exists() and any(path.is_file() for path in dist_dir.iterdir()):
+        return True
+    return len((meta.description or "").strip()) >= 40
+
+
+async def do_prefetch_challenges(deps: CoordinatorDeps, challenge_names: set[str]) -> str:
+    """Pull challenge metadata/distfiles once, concurrently, before spawning solvers."""
+    missing = {name for name in challenge_names if name not in deps.challenge_dirs}
+    if not missing:
+        return "Prefetch skipped: all requested challenges are already cached"
+
+    challenges = await deps.ctfd.fetch_all_challenges()
+    by_name = {str(ch.get("name", "?")): ch for ch in challenges}
+    wanted = [by_name[name] for name in sorted(missing) if name in by_name]
+    if not wanted:
+        return f"Prefetch skipped: none of {len(missing)} challenge(s) were found"
+
+    concurrency = max(1, int(getattr(deps, "challenge_prefetch_concurrency", 6)))
+    sem = asyncio.Semaphore(concurrency)
+    pulled = 0
+
+    async def _pull(ch_data: dict) -> None:
+        nonlocal pulled
+        name = str(ch_data.get("name", "?"))
+        async with sem:
+            if name in deps.challenge_dirs:
+                return
+            ch_dir = await deps.ctfd.pull_challenge(ch_data, str(Path(deps.challenges_root)))
+            deps.challenge_dirs[name] = ch_dir
+            deps.challenge_metas[name] = ChallengeMeta.from_yaml(Path(ch_dir) / "metadata.yml")
+            pulled += 1
+
+    await asyncio.gather(*(_pull(ch) for ch in wanted))
+    return f"Prefetched {pulled}/{len(wanted)} challenge(s) with concurrency={concurrency}"
 
 
 async def do_fetch_challenges(deps: CoordinatorDeps) -> str:
@@ -126,7 +217,10 @@ async def do_spawn_swarm(deps: CoordinatorDeps, challenge_name: str) -> str:
     # stale empty connection_info value from the cached metadata.
     if not meta.connection_info and hasattr(deps.ctfd, "get_connection_info"):
         meta.connection_info = await deps.ctfd.get_connection_info(challenge_name)
-    if not meta.connection_info:
+    if not meta.connection_info and not can_start_without_endpoint(
+        meta,
+        deps.challenge_dirs[challenge_name],
+    ):
         return f"Challenge {challenge_name} blocked: no running connection endpoint"
     if deps.allowed_categories and meta.category.casefold() not in deps.allowed_categories:
         return f"Challenge {challenge_name} skipped: category {meta.category!r} is outside the allowed category filter"
@@ -145,7 +239,7 @@ async def do_spawn_swarm(deps: CoordinatorDeps, challenge_name: str) -> str:
 
     from backend.agents.swarm import ChallengeSwarm
 
-    swarm_model_specs = select_model_specs_for_challenge(deps, challenge_name)
+    swarm_model_specs = select_model_specs_for_challenge(deps, challenge_name, meta.category)
 
     swarm = ChallengeSwarm(
         challenge_dir=deps.challenge_dirs[challenge_name],

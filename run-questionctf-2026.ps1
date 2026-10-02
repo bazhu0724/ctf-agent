@@ -1,8 +1,9 @@
 param(
-    [int]$MaxChallenges = 2,
+    [int]$MaxChallenges = 4,
     [switch]$DryRun,
     [string[]]$Models = @("codex/gpt-5.5", "deepseek/deepseek-flash"),
-    [switch]$RaceModels
+    [switch]$RaceModels,
+    [int]$PrefetchConcurrency = 6
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,6 +24,7 @@ $argsList = @(
     "--coordinator", "codex",
     "--coordinator-model", "gpt-5.5",
     "--max-challenges", "$MaxChallenges",
+    "--prefetch-concurrency", "$PrefetchConcurrency",
     "-v"
 )
 
@@ -41,6 +43,7 @@ if ($RaceModels) {
 Write-Host "Starting ? CTF 2026 automation with ctf-agent..."
 Write-Host "DryRun: $DryRun"
 Write-Host "ModelAssignment: $(if ($RaceModels) { 'race' } else { 'split' })"
+Write-Host "PrefetchConcurrency: $PrefetchConcurrency"
 Write-Host "MaxChallenges: $MaxChallenges"
 Write-Host "ChallengeDir: $ChallengeDir"
 & $Python @argsList
