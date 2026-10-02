@@ -46,6 +46,7 @@ class CoordinatorDeps:
     challenges_root: str = "challenges"
     no_submit: bool = False
     max_concurrent_challenges: int = 10
+    allowed_categories: set[str] = field(default_factory=set)
 
     msg_port: int = 0  # 0 = auto-pick free port
 

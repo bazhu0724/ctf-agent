@@ -6,11 +6,24 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    # Competition platform
+    ctf_platform: str = "ctfd"
+
     # CTFd
     ctfd_url: str = "http://localhost:8000"
     ctfd_user: str = "admin"
     ctfd_pass: str = "admin"
     ctfd_token: str = ""
+
+    # Ret2Shell (RET2SHELL_TOKEN falls back to CTFD_TOKEN for compatibility)
+    ret2shell_token: str = ""
+    ret2shell_game_id: int = 0
+    ret2shell_auto_start_instances: bool = True
+
+    # CTF+ (CTFPLUS_TOKEN falls back to CTFD_TOKEN for compatibility)
+    ctfplus_token: str = ""
+    ctfplus_competition_id: str = ""
+    ctfplus_problem_bank_id: str = ""
 
     # API Keys
     anthropic_api_key: str = ""
@@ -31,5 +44,7 @@ class Settings(BaseSettings):
     max_concurrent_challenges: int = 10
     max_attempts_per_challenge: int = 3
     container_memory_limit: str = "16g"
+    generate_writeups: bool = True
+    writeups_dir: str = "writeups"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}

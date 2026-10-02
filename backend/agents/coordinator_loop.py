@@ -17,6 +17,7 @@ from backend.message_bus import CoordinatorEvent, CoordinatorEventBus, Coordinat
 from backend.models import DEFAULT_MODELS
 from backend.poller import CTFdPoller
 from backend.prompts import ChallengeMeta
+from backend.ret2shell import create_competition_client
 from backend.task_registry import ChallengeRegistry, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -32,14 +33,10 @@ def build_deps(
     no_submit: bool = False,
     challenge_dirs: dict[str, str] | None = None,
     challenge_metas: dict[str, ChallengeMeta] | None = None,
+    allowed_categories: set[str] | None = None,
 ) -> tuple[CTFdClient, CostTracker, CoordinatorDeps]:
     """Create CTFd client, cost tracker, and coordinator deps."""
-    ctfd = CTFdClient(
-        base_url=settings.ctfd_url,
-        token=settings.ctfd_token,
-        username=settings.ctfd_user,
-        password=settings.ctfd_pass,
-    )
+    ctfd = create_competition_client(settings)
     cost_tracker = CostTracker()
     specs = model_specs or list(DEFAULT_MODELS)
     Path(challenges_root).mkdir(parents=True, exist_ok=True)
@@ -52,6 +49,7 @@ def build_deps(
         challenges_root=challenges_root,
         no_submit=no_submit,
         max_concurrent_challenges=getattr(settings, "max_concurrent_challenges", 10),
+        allowed_categories={c.casefold() for c in (allowed_categories or set())},
         challenge_dirs=challenge_dirs or {},
         challenge_metas=challenge_metas or {},
         task_registry=ChallengeRegistry(),
@@ -106,7 +104,13 @@ async def run_event_loop(
         len(poller.known_solved),
     )
 
-    unsolved = poller.known_challenges - poller.known_solved
+    def eligible(name: str) -> bool:
+        if not deps.allowed_categories:
+            return True
+        category = str(poller.challenge_details.get(name, {}).get("category", "")).casefold()
+        return category in deps.allowed_categories
+
+    unsolved = {name for name in poller.known_challenges - poller.known_solved if eligible(name)}
     for name in poller.known_challenges:
         details = poller.challenge_details.get(name, {})
         deps.task_registry.register(
@@ -117,7 +121,7 @@ async def run_event_loop(
         )
         if name in poller.known_solved:
             deps.task_registry.finish(name, TaskStatus.SOLVED)
-        else:
+        elif eligible(name):
             deps.task_registry.queue(name)
     initial_msg = (
         f"CTF is LIVE. {len(poller.known_challenges)} challenges, "
@@ -150,7 +154,7 @@ async def run_event_loop(
                         logger.info("Auto-killed swarm for: %s", evt.challenge_name)
                 if evt.kind == "challenge_solved":
                     deps.task_registry.finish(evt.challenge_name, TaskStatus.SOLVED)
-                elif evt.kind == "new_challenge":
+                elif evt.kind == "new_challenge" and eligible(evt.challenge_name):
                     deps.task_registry.register(
                         evt.challenge_name,
                         category=evt.details.get("category", ""),
@@ -282,7 +286,12 @@ async def _auto_spawn_one(deps: CoordinatorDeps, challenge_name: str) -> bool:
 
 async def _auto_spawn_unsolved(deps: CoordinatorDeps, poller) -> None:
     """Auto-spawn swarms for all unsolved challenges that don't have active swarms."""
-    unsolved = poller.known_challenges - poller.known_solved
+    unsolved = {
+        name for name in poller.known_challenges - poller.known_solved
+        if not deps.allowed_categories
+        or str(poller.challenge_details.get(name, {}).get("category", "")).casefold()
+        in deps.allowed_categories
+    }
     for name in unsolved:
         deps.task_registry.queue(name)
     await _fill_available_slots(deps)

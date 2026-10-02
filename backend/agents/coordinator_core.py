@@ -23,6 +23,8 @@ async def do_fetch_challenges(deps: CoordinatorDeps) -> str:
     result = []
     for ch in challenges:
         name = ch.get("name", "?")
+        if deps.allowed_categories and str(ch.get("category", "")).casefold() not in deps.allowed_categories:
+            continue
         status = "SOLVED" if name in solved else "unsolved"
         if deps.task_registry:
             task = deps.task_registry.register(
@@ -91,6 +93,15 @@ async def do_spawn_swarm(deps: CoordinatorDeps, challenge_name: str) -> str:
         deps.challenge_metas[challenge_name] = ChallengeMeta.from_yaml(Path(ch_dir) / "metadata.yml")
 
     meta = deps.challenge_metas[challenge_name]
+    # A user may start an instance after the challenge metadata was pulled.
+    # Refresh the platform endpoint so the coordinator does not keep using a
+    # stale empty connection_info value from the cached metadata.
+    if not meta.connection_info and hasattr(deps.ctfd, "get_connection_info"):
+        meta.connection_info = await deps.ctfd.get_connection_info(challenge_name)
+    if not meta.connection_info:
+        return f"Challenge {challenge_name} blocked: no running connection endpoint"
+    if deps.allowed_categories and meta.category.casefold() not in deps.allowed_categories:
+        return f"Challenge {challenge_name} skipped: category {meta.category!r} is outside the allowed category filter"
     if deps.task_registry:
         deps.task_registry.start(
             challenge_name,

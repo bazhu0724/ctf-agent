@@ -21,16 +21,14 @@ if TYPE_CHECKING:
 
 # Default model specs — claude-sdk and codex providers use the new solver backends
 DEFAULT_MODELS: list[str] = [
-    "claude-sdk/claude-opus-4-6/medium",
-    "claude-sdk/claude-opus-4-6/max",
-    "codex/gpt-5.6-sol",
-    "codex/gpt-5.3-codex",
+    "codex/gpt-5.5",
 ]
 
 # Context window sizes (tokens)
 CONTEXT_WINDOWS: dict[str, int] = {
     "us.anthropic.claude-opus-4-6-v1": 1_000_000,
     "claude-opus-4-6": 1_000_000,
+    "gpt-5.5": 1_000_000,
     "gpt-5.6-sol": 1_000_000,
     "gpt-5.3-codex": 1_000_000,
     "gpt-5.3-codex-spark": 128_000,

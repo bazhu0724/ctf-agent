@@ -141,6 +141,22 @@ Each solver gets an isolated Docker container pre-loaded with CTF tools:
 - **Flag guardrails** — local placeholder/control-character checks plus deduplicated CTFd verification
 - **Docker sandboxes** — isolated containers with full CTF tooling
 - **Operator messaging** — send hints to running solvers mid-competition
+- **Automatic write-ups** — confirmed solves create a redacted Markdown WP and preserve text solution files
+
+## Automatic Write-ups
+
+Write-up generation is enabled by default. After a solver confirms a flag, the agent writes:
+
+```text
+writeups/<category>/<challenge>/README.md
+writeups/<category>/<challenge>/artifacts/...
+```
+
+The default WP contains challenge metadata, participating and winning models, solver findings,
+reproduction guidance, verification state, flag, and sanitized text files from the winning
+workspace. Common API key, token, cookie, and password forms are redacted.
+
+Use `--writeups-dir PATH` to select another output directory or `--no-writeups` to disable it.
 
 ## Configuration
 
@@ -159,6 +175,41 @@ GEMINI_API_KEY=...
 ```
 
 All settings can also be passed as environment variables or CLI flags.
+
+### Ret2Shell platforms
+
+Ret2Shell uses a different API from CTFd. Select its adapter and game explicitly:
+
+```env
+CTF_PLATFORM=ret2shell
+CTFD_URL=https://ctf.example.com
+RET2SHELL_TOKEN=current_bearer_session_token
+RET2SHELL_GAME_ID=37
+RET2SHELL_AUTO_START_INSTANCES=true
+```
+
+The same values can be selected with `--platform ret2shell --game-id 37`. The adapter
+uses `/api/game/...`, downloads attachments, starts a challenge instance when required,
+polls asynchronous flag submissions, handles `Set-Token` rotation in memory, and keeps
+the existing coordinator/swarm interface unchanged.
+
+### CTF+ platforms
+
+CTF+ (`ctfplus.cn`) uses JSON endpoints and a browser token named `mario-token`.
+Select the adapter and competition explicitly:
+
+```env
+CTF_PLATFORM=ctfplus
+CTFD_URL=https://www.ctfplus.cn
+CTFPLUS_TOKEN=current_mario_token
+CTFPLUS_COMPETITION_ID=2105658865197518848
+```
+
+The same values can be selected with
+`--platform ctfplus --ctfd-url https://www.ctfplus.cn --competition-id 2105658865197518848`.
+The adapter polls CTF+ problem lists, downloads visible attachments, starts dynamic
+containers when requested, submits flags through `challenge/submit`, and keeps the
+existing coordinator/swarm interface unchanged.
 
 ## Requirements
 

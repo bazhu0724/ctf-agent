@@ -52,8 +52,8 @@ def test_deepseek_resolves_openai_compatible_model() -> None:
     assert model_settings["max_tokens"] == 128_000
 
 
-def test_codex_defaults_use_sol() -> None:
-    assert "codex/gpt-5.6-sol" in DEFAULT_MODELS
+def test_codex_defaults_use_gpt55() -> None:
+    assert "codex/gpt-5.5" in DEFAULT_MODELS
     assert "codex/gpt-5.4" not in DEFAULT_MODELS
     assert context_window("codex/gpt-5.6-sol") == 1_000_000
 
