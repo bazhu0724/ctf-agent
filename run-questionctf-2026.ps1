@@ -1,7 +1,8 @@
 param(
     [int]$MaxChallenges = 2,
     [switch]$DryRun,
-    [string[]]$Models = @("codex/gpt-5.5")
+    [string[]]$Models = @("codex/gpt-5.5", "deepseek/deepseek-flash"),
+    [switch]$RaceModels
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,8 +34,13 @@ if ($DryRun) {
     $argsList += "--no-submit"
 }
 
+if ($RaceModels) {
+    $argsList += "--race-models"
+}
+
 Write-Host "Starting ? CTF 2026 automation with ctf-agent..."
 Write-Host "DryRun: $DryRun"
+Write-Host "ModelAssignment: $(if ($RaceModels) { 'race' } else { 'split' })"
 Write-Host "MaxChallenges: $MaxChallenges"
 Write-Host "ChallengeDir: $ChallengeDir"
 & $Python @argsList

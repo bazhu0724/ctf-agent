@@ -42,6 +42,11 @@ def _setup_logging(verbose: bool = False) -> None:
 @click.option("--problem-bank-id", default=None, help="CTF+ problem bank ID (optional)")
 @click.option("--image", default="ctf-sandbox", help="Docker sandbox image name")
 @click.option("--models", multiple=True, help="Model specs (default: all configured)")
+@click.option(
+    "--race-models",
+    is_flag=True,
+    help="Run every configured model on every challenge instead of splitting models across challenges",
+)
 @click.option("--challenge", default=None, help="Solve a single challenge directory")
 @click.option("--category", multiple=True, help="Coordinator category filter (repeatable)")
 @click.option("--challenges-dir", default="challenges", help="Directory for challenge files")
@@ -71,6 +76,7 @@ def main(
     problem_bank_id: str | None,
     image: str,
     models: tuple[str, ...],
+    race_models: bool,
     challenge: str | None,
     category: tuple[str, ...],
     challenges_dir: str,
@@ -103,6 +109,7 @@ def main(
     if problem_bank_id:
         settings.ctfplus_problem_bank_id = problem_bank_id
     settings.max_concurrent_challenges = max_challenges
+    settings.split_models_across_challenges = not race_models
     settings.writeups_dir = writeups_dir
     settings.generate_writeups = not no_writeups
 
@@ -118,6 +125,7 @@ def main(
         if settings.ctfplus_problem_bank_id:
             console.print(f"  Problem bank ID: {settings.ctfplus_problem_bank_id}")
     console.print(f"  Models: {', '.join(model_specs)}")
+    console.print(f"  Model assignment: {'race' if race_models else 'split'}")
     console.print(f"  Image: {settings.sandbox_image}")
     console.print(f"  Max challenges: {max_challenges}")
     console.print(f"  Write-ups: {writeups_dir if not no_writeups else 'disabled'}")

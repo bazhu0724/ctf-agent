@@ -17,6 +17,34 @@ from backend.task_registry import TaskStatus
 logger = logging.getLogger(__name__)
 
 
+def select_model_specs_for_challenge(deps: CoordinatorDeps, challenge_name: str) -> list[str]:
+    """Choose solver models for a challenge.
+
+    By default the coordinator assigns one configured model per challenge in a
+    round-robin schedule so GPT-5.5 and DeepSeek can work on different problems
+    instead of duplicating effort.  Set ``split_models_across_challenges`` false
+    to restore the old race mode where every model attacks every challenge.
+    """
+    model_specs = list(deps.model_specs)
+    if not model_specs:
+        return []
+    if not getattr(deps, "split_models_across_challenges", True) or len(model_specs) <= 1:
+        return model_specs
+
+    assignments = getattr(deps, "challenge_model_assignments", None)
+    if assignments is None:
+        deps.challenge_model_assignments = {}
+        assignments = deps.challenge_model_assignments
+    if challenge_name in assignments:
+        return list(assignments[challenge_name])
+
+    cursor = getattr(deps, "model_assignment_cursor", 0)
+    chosen = [model_specs[cursor % len(model_specs)]]
+    assignments[challenge_name] = chosen
+    deps.model_assignment_cursor = cursor + 1
+    return list(chosen)
+
+
 async def do_fetch_challenges(deps: CoordinatorDeps) -> str:
     challenges = await deps.ctfd.fetch_all_challenges()
     solved = await deps.ctfd.fetch_solved_names()
@@ -117,13 +145,15 @@ async def do_spawn_swarm(deps: CoordinatorDeps, challenge_name: str) -> str:
 
     from backend.agents.swarm import ChallengeSwarm
 
+    swarm_model_specs = select_model_specs_for_challenge(deps, challenge_name)
+
     swarm = ChallengeSwarm(
         challenge_dir=deps.challenge_dirs[challenge_name],
         meta=meta,
         ctfd=deps.ctfd,
         cost_tracker=deps.cost_tracker,
         settings=deps.settings,
-        model_specs=deps.model_specs,
+        model_specs=swarm_model_specs,
         no_submit=deps.no_submit,
         coordinator_inbox=deps.coordinator_inbox,
         coordinator_event_bus=deps.event_bus,
@@ -193,7 +223,8 @@ async def do_spawn_swarm(deps: CoordinatorDeps, challenge_name: str) -> str:
 
     task = asyncio.create_task(_run_and_cleanup(), name=f"swarm-{challenge_name}")
     deps.swarm_tasks[challenge_name] = task
-    return f"Swarm spawned for {challenge_name} with {len(deps.model_specs)} models"
+    mode = "split" if getattr(deps, "split_models_across_challenges", True) else "race"
+    return f"Swarm spawned for {challenge_name} with {len(swarm_model_specs)} model(s) [{mode}]: {', '.join(swarm_model_specs)}"
 
 
 async def do_check_swarm_status(deps: CoordinatorDeps, challenge_name: str) -> str:

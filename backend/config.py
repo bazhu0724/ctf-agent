@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     # Infra
     sandbox_image: str = "ctf-sandbox"
     max_concurrent_challenges: int = 10
+    split_models_across_challenges: bool = True
     max_attempts_per_challenge: int = 3
     container_memory_limit: str = "16g"
     generate_writeups: bool = True

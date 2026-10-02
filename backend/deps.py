@@ -46,6 +46,7 @@ class CoordinatorDeps:
     challenges_root: str = "challenges"
     no_submit: bool = False
     max_concurrent_challenges: int = 10
+    split_models_across_challenges: bool = True
     allowed_categories: set[str] = field(default_factory=set)
 
     msg_port: int = 0  # 0 = auto-pick free port
@@ -58,5 +59,7 @@ class CoordinatorDeps:
     results: dict[str, dict] = field(default_factory=dict)
     challenge_dirs: dict[str, str] = field(default_factory=dict)
     challenge_metas: dict[str, Any] = field(default_factory=dict)
+    challenge_model_assignments: dict[str, list[str]] = field(default_factory=dict)
+    model_assignment_cursor: int = 0
     task_registry: ChallengeRegistry = field(default_factory=ChallengeRegistry)
     event_bus: CoordinatorEventBus = field(default_factory=CoordinatorEventBus)

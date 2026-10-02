@@ -49,6 +49,7 @@ def build_deps(
         challenges_root=challenges_root,
         no_submit=no_submit,
         max_concurrent_challenges=getattr(settings, "max_concurrent_challenges", 10),
+        split_models_across_challenges=getattr(settings, "split_models_across_challenges", True),
         allowed_categories={c.casefold() for c in (allowed_categories or set())},
         challenge_dirs=challenge_dirs or {},
         challenge_metas=challenge_metas or {},

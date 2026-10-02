@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 # Default model specs — claude-sdk and codex providers use the new solver backends
 DEFAULT_MODELS: list[str] = [
     "codex/gpt-5.5",
+    "deepseek/deepseek-flash",
 ]
 
 # Context window sizes (tokens)
