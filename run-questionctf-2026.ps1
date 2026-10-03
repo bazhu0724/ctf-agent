@@ -3,7 +3,8 @@ param(
     [switch]$DryRun,
     [string[]]$Models = @("codex/gpt-5.5", "deepseek/deepseek-flash"),
     [switch]$RaceModels,
-    [int]$PrefetchConcurrency = 6
+    [int]$PrefetchConcurrency = 6,
+    [int]$StatusPort = 9400
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,6 +25,7 @@ $argsList = @(
     "--coordinator", "codex",
     "--coordinator-model", "gpt-5.5",
     "--max-challenges", "$MaxChallenges",
+    "--msg-port", "$StatusPort",
     "--prefetch-concurrency", "$PrefetchConcurrency",
     "-v"
 )
@@ -45,5 +47,6 @@ Write-Host "DryRun: $DryRun"
 Write-Host "ModelAssignment: $(if ($RaceModels) { 'race' } else { 'split' })"
 Write-Host "PrefetchConcurrency: $PrefetchConcurrency"
 Write-Host "MaxChallenges: $MaxChallenges"
+Write-Host "Status: .\status-questionctf-2026.ps1 -Port $StatusPort"
 Write-Host "ChallengeDir: $ChallengeDir"
 & $Python @argsList

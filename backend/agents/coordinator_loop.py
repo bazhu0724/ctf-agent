@@ -98,7 +98,7 @@ async def run_event_loop(
     await poller.start()
 
     # Start operator message HTTP endpoint
-    msg_server = await _start_msg_server(deps.operator_inbox, deps.msg_port)
+    msg_server = await _start_msg_server(deps, deps.msg_port)
 
     logger.info(
         "Coordinator starting: %d models, %d challenges, %d solved",
@@ -321,8 +321,33 @@ async def _fill_available_slots(deps: CoordinatorDeps) -> None:
             return
 
 
-async def _start_msg_server(inbox: asyncio.Queue, port: int = 0) -> asyncio.Server | None:
-    """Start a tiny HTTP server that accepts operator messages via POST."""
+def _status_payload(deps: CoordinatorDeps) -> dict[str, Any]:
+    """Build a compact live status payload for operator scripts."""
+    active: list[dict[str, Any]] = []
+    for challenge_name, swarm in deps.swarms.items():
+        task = deps.swarm_tasks.get(challenge_name)
+        is_running = bool(task and not task.done() and not swarm.cancel_event.is_set())
+        status = swarm.get_status()
+        agents = status.get("agents", {})
+        for model_spec, agent_status in agents.items():
+            active.append({
+                "model": model_spec,
+                "challenge": challenge_name,
+                "status": agent_status.get("status", "running" if is_running else "finished"),
+                "findings": agent_status.get("findings", ""),
+            })
+    return {
+        "active": active,
+        "active_count": len({item["challenge"] for item in active if item["status"] == "running"}),
+        "results": deps.results,
+        "task_registry": deps.task_registry.snapshot() if deps.task_registry else [],
+        "total_cost_usd": round(deps.cost_tracker.total_cost_usd, 4),
+        "total_tokens": deps.cost_tracker.total_tokens,
+    }
+
+
+async def _start_msg_server(deps: CoordinatorDeps, port: int = 0) -> asyncio.Server | None:
+    """Start a tiny HTTP server for operator POST messages and GET status."""
 
     async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
@@ -337,10 +362,15 @@ async def _start_msg_server(inbox: asyncio.Queue, port: int = 0) -> asyncio.Serv
                     k, v = line.decode().split(":", 1)
                     headers[k.strip().lower()] = v.strip()
 
-            method = request_line.decode().split()[0] if request_line else ""
+            request_parts = request_line.decode().split() if request_line else []
+            method = request_parts[0] if request_parts else ""
+            target = request_parts[1] if len(request_parts) > 1 else "/"
             content_length = int(headers.get("content-length", 0))
 
-            if method == "POST" and content_length > 0:
+            if method == "GET" and target.split("?", 1)[0] == "/status":
+                resp = json.dumps(_status_payload(deps), ensure_ascii=False, indent=2)
+                writer.write(f"HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {len(resp.encode('utf-8'))}\r\n\r\n{resp}".encode("utf-8"))
+            elif method == "POST" and content_length > 0:
                 body = await asyncio.wait_for(reader.read(content_length), timeout=5)
                 try:
                     data = json.loads(body)
@@ -348,11 +378,14 @@ async def _start_msg_server(inbox: asyncio.Queue, port: int = 0) -> asyncio.Serv
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     message = body.decode("utf-8", errors="replace")
 
-                inbox.put_nowait(message)
+                deps.operator_inbox.put_nowait(message)
                 resp = json.dumps({"ok": True, "queued": message[:200]})
                 writer.write(f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {len(resp)}\r\n\r\n{resp}".encode())
             else:
-                resp = json.dumps({"error": "POST with JSON body required", "usage": "POST {\"message\": \"...\"}"})
+                resp = json.dumps({
+                    "error": "Use GET /status or POST with JSON body",
+                    "usage": "GET /status OR POST {\"message\": \"...\"}",
+                })
                 writer.write(f"HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {len(resp)}\r\n\r\n{resp}".encode())
 
             await writer.drain()
