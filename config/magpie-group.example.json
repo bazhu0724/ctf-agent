@@ -1,0 +1,11 @@
+{
+  "id": "free-workers",
+  "name": "Free Workers",
+  "members": [
+    "opencode-zen/deepseek-v4.1-flash-free:low",
+    "opencode-zen/glm-5.3-flash-free:low",
+    "opencode-zen/beam-free:low"
+  ],
+  "routing": "order",
+  "affinity": "session"
+}

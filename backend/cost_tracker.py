@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,10 +20,29 @@ PROVIDER_MAP: dict[str, str] = {
     "zen": "openai",
     "codex": "openai",
     "google": "google",
+    "deepseek": "deepseek",
+    "magpie": "magpie",
 }
 
 # Fallback pricing for models not in genai-prices (per 1M tokens, USD)
 FALLBACK_PRICING: dict[str, dict[str, float]] = {
+    # DeepSeek publishes peak and off-peak rates. Use peak rates here so the
+    # local estimate is conservative; the billed amount may be lower off-peak.
+    "deepseek-flash": {
+        "input": 0.30,
+        "cached_input": 0.006,
+        "output": 1.20,
+    },
+    "deepseek-v4-flash": {
+        "input": 0.30,
+        "cached_input": 0.006,
+        "output": 1.20,
+    },
+    "deepseek-v4-pro": {
+        "input": 1.32,
+        "cached_input": 0.044,
+        "output": 3.96,
+    },
     "us.anthropic.claude-opus-4-6-v1": {
         "input": 5.00,
         "cached_input": 0.50,
@@ -32,16 +52,6 @@ FALLBACK_PRICING: dict[str, dict[str, float]] = {
         "input": 5.00,
         "cached_input": 0.50,
         "output": 25.00,
-    },
-    "gpt-5.4-mini": {
-        "input": 0.75,
-        "cached_input": 0.075,
-        "output": 4.50,
-    },
-    "gpt-5.4": {
-        "input": 2.50,
-        "cached_input": 0.25,
-        "output": 15.00,
     },
     "gpt-5.3-codex": {
         "input": 1.75,
@@ -81,6 +91,13 @@ def calc_cost(usage: RunUsage, model_name: str, provider_spec: str = "") -> floa
     if not usage.has_values():
         return 0.0
 
+    # Gateway membership is operator-configured; this is an estimate, not billing.
+    if provider_spec == "magpie":
+        if model_name in {"group/free-workers", "group/auto-beam-free"}:
+            return 0.0
+        logger.warning("Magpie route pricing is unknown; not reporting it as free")
+        return math.nan
+
     provider_id = PROVIDER_MAP.get(provider_spec, "unknown")
 
     try:
@@ -95,6 +112,10 @@ def calc_cost(usage: RunUsage, model_name: str, provider_spec: str = "") -> floa
 
     logger.warning(f"Could not calculate cost for {model_name}")
     return 0.0
+
+
+def format_cost(value: float) -> str:
+    return f"${value:.2f}" if math.isfinite(value) else "unknown"
 
 
 def _fmt_tokens(n: int) -> str:
@@ -192,7 +213,7 @@ class CostTracker:
             f"{_fmt_tokens(u.input_tokens)} in / "
             f"{_fmt_tokens(u.cache_read_tokens)} cached ({_cache_rate(u)} hit) / "
             f"{_fmt_tokens(u.output_tokens)} out | "
-            f"${agent.cost_usd:.2f} | "
+            f"{format_cost(agent.cost_usd)} | "
             f"{agent.duration_seconds:.1f}s"
         )
 
@@ -214,8 +235,8 @@ class CostTracker:
         for model, s in by_model.items():
             hit_rate = f"{(s['cached'] / s['input'] * 100):.0f}%" if s["input"] > 0 else "n/a"
             logger.info(
-                "  %s: $%.2f | %s in / %s cached (%s hit) / %s out",
-                model, s["cost"],
+                "  %s: %s | %s in / %s cached (%s hit) / %s out",
+                model, format_cost(s["cost"]),
                 _fmt_tokens(s["input"]),
                 _fmt_tokens(s["cached"]),
                 hit_rate,
@@ -225,8 +246,8 @@ class CostTracker:
         total_cached = sum(s["cached"] for s in by_model.values())
         overall_hit = f"{(total_cached / total * 100):.0f}%" if total > 0 else "n/a"
         logger.info(
-            "  Total: $%.2f | %s tokens | %s overall cache hit rate",
-            self.total_cost_usd,
+            "  Total: %s | %s tokens | %s overall cache hit rate",
+            format_cost(self.total_cost_usd),
             _fmt_tokens(self.total_tokens),
             overall_hit,
         )

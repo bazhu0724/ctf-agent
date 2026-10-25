@@ -1,14 +1,16 @@
-"""Model resolution — Bedrock, Azure OpenAI, Zen, Google AI Studio."""
+"""Model resolution — Bedrock, Azure OpenAI, Zen, Magpie, Google AI Studio."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import boto3
+from google.genai.types import ThinkingLevel
 from pydantic_ai.models import Model
 from pydantic_ai.models.bedrock import BedrockConverseModel, BedrockModelSettings
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
-from pydantic_ai.models.openai import OpenAIModel, OpenAIModelSettings
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
+from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.bedrock import BedrockProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -17,32 +19,33 @@ from pydantic_ai.settings import ModelSettings
 if TYPE_CHECKING:
     from backend.config import Settings
 
-# Default model specs — claude-sdk and codex providers use the new solver backends
+# Default model specs — claude-sdk and codex providers use the new solver backends.
+# The default route is a locally configured free pool. Verify its members in Magpie.
 DEFAULT_MODELS: list[str] = [
-    "claude-sdk/claude-opus-4-6/medium",
-    "claude-sdk/claude-opus-4-6/max",
-    "codex/gpt-5.4",
-    "codex/gpt-5.4-mini",
-    "codex/gpt-5.3-codex",
+    "magpie/group/free-workers",
 ]
 
 # Context window sizes (tokens)
 CONTEXT_WINDOWS: dict[str, int] = {
     "us.anthropic.claude-opus-4-6-v1": 1_000_000,
     "claude-opus-4-6": 1_000_000,
-    "gpt-5.4": 1_000_000,
-    "gpt-5.4-mini": 400_000,
+    "opencode-zen/deepseek-v4.1-flash-free": 1_000_000,
+    "opencode-zen/glm-5.3-flash-free": 1_000_000,
+    "gpt-5.5": 1_000_000,
+    "gpt-5.6-sol": 1_000_000,
     "gpt-5.3-codex": 1_000_000,
     "gpt-5.3-codex-spark": 128_000,
     "gemini-3-flash-preview": 1_000_000,
+    "deepseek-v4-pro": 1_000_000,
+    "deepseek-flash": 1_000_000,
+    "deepseek-v4-flash": 1_000_000,
 }
 
 # Models that support vision
 VISION_MODELS: set[str] = {
     "us.anthropic.claude-opus-4-6-v1",
     "claude-opus-4-6",
-    "gpt-5.4",
-    "gpt-5.4-mini",
+    "gpt-5.6-sol",
     "gemini-3-flash-preview",
 }
 
@@ -69,7 +72,7 @@ def resolve_model(spec: str, settings: Settings) -> Model:
                     provider=BedrockProvider(bedrock_client=client),
                 )
         case "azure":
-            return OpenAIModel(
+            return OpenAIChatModel(
                 model_id,
                 provider=OpenAIProvider(
                     base_url=settings.azure_openai_endpoint,
@@ -77,12 +80,36 @@ def resolve_model(spec: str, settings: Settings) -> Model:
                 ),
             )
         case "zen":
-            return OpenAIModel(
+            return OpenAIChatModel(
                 model_id,
                 provider=OpenAIProvider(
                     base_url="https://opencode.ai/zen/v1",
                     api_key=settings.opencode_zen_api_key,
                 ),
+            )
+        case "magpie":
+            # Local gateway. Model IDs keep their own slashes, e.g.
+            # magpie/group/free-workers -> model_id "group/free-workers".
+            return OpenAIChatModel(
+                model_id,
+                provider=OpenAIProvider(
+                    base_url=settings.magpie_base_url,
+                    api_key=settings.magpie_api_key,
+                ),
+                profile=OpenAIModelProfile(openai_supports_tool_choice_required=False),
+            )
+        case "deepseek":
+            if not settings.deepseek_api_key:
+                raise ValueError("DEEPSEEK_API_KEY is required for deepseek/* models")
+            return OpenAIChatModel(
+                model_id,
+                provider=OpenAIProvider(
+                    base_url=settings.deepseek_base_url,
+                    api_key=settings.deepseek_api_key,
+                ),
+                # DeepSeek thinking mode rejects tool_choice="required". Pydantic AI
+                # will use "auto" instead while preserving the same callable tools.
+                profile=OpenAIModelProfile(openai_supports_tool_choice_required=False),
             )
         case "google":
             return GoogleModel(
@@ -98,7 +125,7 @@ def resolve_model(spec: str, settings: Settings) -> Model:
             raise ValueError(f"Unknown provider: {provider}")
 
 
-def resolve_model_settings(spec: str) -> ModelSettings:
+def resolve_model_settings(spec: str, settings: Settings | None = None) -> ModelSettings:
     """Get provider-specific model settings with caching enabled."""
     provider = spec.split("/", 1)[0]
     match provider:
@@ -109,18 +136,26 @@ def resolve_model_settings(spec: str) -> ModelSettings:
                 bedrock_cache_tool_definitions=True,
                 bedrock_cache_messages=True,
             )
-        case "azure" | "zen":
-            # Azure/Zen use OpenAI chat completions — server-side prompt caching
+        case "magpie":
+            result = OpenAIChatModelSettings(
+                max_tokens=getattr(settings, "magpie_max_tokens", 8192),
+            )
+            effort = effort_from_spec(spec)
+            if effort:
+                result["openai_reasoning_effort"] = effort
+            return result
+        case "azure" | "zen" | "deepseek":
+            # These providers use OpenAI-compatible chat completions. Prompt caching
             # is automatic, no explicit config needed. Set max_tokens to avoid
             # reserving the full context window.
-            return OpenAIModelSettings(
+            return OpenAIChatModelSettings(
                 max_tokens=128_000,
             )
         case "google":
             return GoogleModelSettings(
                 max_tokens=64_000,
                 google_thinking_config={
-                    "thinking_level": "high",
+                    "thinking_level": ThinkingLevel.HIGH,
                     "include_thoughts": True,
                 },
             )
@@ -130,6 +165,14 @@ def resolve_model_settings(spec: str) -> ModelSettings:
 
 def model_id_from_spec(spec: str) -> str:
     """Extract just the model ID from a spec (strips effort suffix)."""
+    provider, _, rest = spec.partition("/")
+    if provider == "magpie" and rest:
+        # Magpie model IDs contain slashes (group/free-workers). Only a trailing
+        # effort segment is stripped, and only when something precedes it.
+        parts = rest.split("/")
+        if len(parts) > 1 and parts[-1] in ("low", "medium", "high", "max"):
+            parts = parts[:-1]
+        return "/".join(parts)
     parts = spec.split("/")
     return parts[1] if len(parts) >= 2 else spec
 
@@ -142,8 +185,10 @@ def provider_from_spec(spec: str) -> str:
 def effort_from_spec(spec: str) -> str | None:
     """Extract effort level from a spec like 'claude-sdk/claude-opus-4-6/max'."""
     parts = spec.split("/")
-    if len(parts) >= 3 and parts[2] in ("low", "medium", "high", "max"):
-        return parts[2]
+    if len(parts) >= 3 and parts[-1] in ("low", "medium", "high", "max"):
+        # For magpie specs the model ID itself may contain slashes, so the effort
+        # is always the final segment.
+        return parts[-1] if spec.startswith("magpie/") else parts[2]
     return None
 
 
