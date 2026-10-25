@@ -1,0 +1,19 @@
+name: offline-checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+      - run: uv run --locked pytest -q tests -p no:cacheprovider --import-mode=importlib
+      - run: uv run --locked ruff check backend tests
+      - run: uv run --locked ctf-doctor --json

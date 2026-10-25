@@ -1,14 +1,16 @@
+from pathlib import Path
 from types import SimpleNamespace
 
-from pathlib import Path
-
-from backend.agents.coordinator_core import can_start_without_endpoint, select_model_specs_for_challenge
+from backend.agents.coordinator_core import (
+    can_start_without_endpoint,
+    select_model_specs_for_challenge,
+)
 from backend.prompts import ChallengeMeta
 
 
 def _deps(split=True):
     return SimpleNamespace(
-        model_specs=["codex/gpt-5.5", "deepseek/deepseek-flash"],
+        model_specs=["magpie/group/free-workers", "magpie/group/auto-beam-free"],
         split_models_across_challenges=split,
         challenge_model_assignments={},
         model_assignment_cursor=0,
@@ -18,9 +20,9 @@ def _deps(split=True):
 def test_split_model_assignment_round_robins_challenges():
     deps = _deps()
 
-    assert select_model_specs_for_challenge(deps, "web-a") == ["codex/gpt-5.5"]
-    assert select_model_specs_for_challenge(deps, "crypto-b") == ["deepseek/deepseek-flash"]
-    assert select_model_specs_for_challenge(deps, "misc-c") == ["codex/gpt-5.5"]
+    assert select_model_specs_for_challenge(deps, "web-a") == ["magpie/group/free-workers"]
+    assert select_model_specs_for_challenge(deps, "crypto-b") == ["magpie/group/auto-beam-free"]
+    assert select_model_specs_for_challenge(deps, "misc-c") == ["magpie/group/free-workers"]
 
 
 def test_split_model_assignment_is_sticky_for_challenge():
@@ -29,7 +31,7 @@ def test_split_model_assignment_is_sticky_for_challenge():
     first = select_model_specs_for_challenge(deps, "reverse-a")
     second = select_model_specs_for_challenge(deps, "reverse-a")
 
-    assert first == second == ["codex/gpt-5.5"]
+    assert first == second == ["magpie/group/free-workers"]
     assert deps.model_assignment_cursor == 1
 
 
@@ -37,8 +39,8 @@ def test_race_model_assignment_keeps_all_models():
     deps = _deps(split=False)
 
     assert select_model_specs_for_challenge(deps, "pwn-a") == [
-        "codex/gpt-5.5",
-        "deepseek/deepseek-flash",
+        "magpie/group/free-workers",
+        "magpie/group/auto-beam-free",
     ]
     assert deps.model_assignment_cursor == 0
 
@@ -46,16 +48,16 @@ def test_race_model_assignment_keeps_all_models():
 def test_split_model_assignment_uses_category_when_loads_are_tied():
     deps = _deps()
 
-    assert select_model_specs_for_challenge(deps, "rsa-a", "Crypto") == ["deepseek/deepseek-flash"]
+    assert select_model_specs_for_challenge(deps, "rsa-a", "Crypto") == ["magpie/group/auto-beam-free"]
 
 
 def test_split_model_assignment_balances_active_model_loads():
     deps = _deps()
     deps.swarms = {
-        "active-crypto": SimpleNamespace(model_specs=["deepseek/deepseek-flash"]),
+        "active-crypto": SimpleNamespace(model_specs=["magpie/group/auto-beam-free"]),
     }
 
-    assert select_model_specs_for_challenge(deps, "rsa-b", "Crypto") == ["codex/gpt-5.5"]
+    assert select_model_specs_for_challenge(deps, "rsa-b", "Crypto") == ["magpie/group/free-workers"]
 
 
 def test_offline_friendly_challenges_can_start_without_endpoint(tmp_path: Path):

@@ -18,8 +18,11 @@ logger = logging.getLogger(__name__)
 
 
 MODEL_CATEGORY_PREFERENCES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
-    (("crypto", "cryptography", "misc", "forensics", "stego", "osint", "ai", "ml"), ("deepseek/deepseek-flash",)),
-    (("web", "pwn", "binary", "reverse", "reversing", "re"), ("codex/gpt-5.5",)),
+    (
+        ("crypto", "cryptography", "misc", "forensics", "stego", "osint", "ai", "ml"),
+        ("magpie/group/auto-beam-free",),
+    ),
+    (("web", "pwn", "binary", "reverse", "reversing", "re"), ("magpie/group/free-workers",)),
 )
 
 OFFLINE_FRIENDLY_CATEGORIES = {
@@ -48,7 +51,7 @@ def _category_preferences(category: str, model_specs: list[str]) -> list[str]:
 
 
 def _active_model_loads(deps: CoordinatorDeps, model_specs: list[str]) -> dict[str, int]:
-    loads = {spec: 0 for spec in model_specs}
+    loads = dict.fromkeys(model_specs, 0)
     for swarm in getattr(deps, "swarms", {}).values():
         for spec in getattr(swarm, "model_specs", []):
             if spec in loads:

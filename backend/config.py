@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -39,9 +40,16 @@ class Settings(BaseSettings):
     azure_openai_api_key: str = ""
     opencode_zen_api_key: str = ""
 
+    # Magpie — local OpenAI-compatible gateway (free worker pool)
+    magpie_base_url: str = "http://127.0.0.1:3425/v1"
+    magpie_api_key: str = "magpie-codex"
+    magpie_max_tokens: int = Field(default=8192, ge=1)
+    solver_request_limit: int = Field(default=100, ge=1)
+    solver_max_bumps: int = Field(default=2, ge=0)
+
     # Infra
     sandbox_image: str = "ctf-sandbox"
-    max_concurrent_challenges: int = 10
+    max_concurrent_challenges: int = 3
     split_models_across_challenges: bool = True
     prefetch_all_challenges: bool = True
     challenge_prefetch_concurrency: int = 6

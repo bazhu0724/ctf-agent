@@ -135,10 +135,16 @@ COORDINATOR_TOOLS = [
 ]
 
 
+# Coordinator runs a Codex app-server thread, so the ID is resolved by the Codex
+# config's provider. With the local Magpie gateway configured, "codex/gpt-6-astra"
+# reaches the paid Astra model while solver traffic stays on the free pool.
+DEFAULT_COORDINATOR_MODEL = "codex/gpt-6-astra"
+
+
 class CodexCoordinator:
     """Coordinator using Codex App Server JSON-RPC."""
 
-    def __init__(self, deps: CoordinatorDeps, model: str = "gpt-5.5") -> None:
+    def __init__(self, deps: CoordinatorDeps, model: str = DEFAULT_COORDINATOR_MODEL) -> None:
         self.deps = deps
         self.model = model
         self._proc: asyncio.subprocess.Process | None = None
@@ -339,7 +345,7 @@ async def run_codex_coordinator(
     )
     deps.msg_port = msg_port
 
-    resolved_model = coordinator_model or "gpt-5.5"
+    resolved_model = coordinator_model or DEFAULT_COORDINATOR_MODEL
     coordinator = CodexCoordinator(deps, model=resolved_model)
     await coordinator.start()
 

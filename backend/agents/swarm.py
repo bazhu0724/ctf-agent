@@ -36,55 +36,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Quota fallback: map subscription-backed providers to API-backed equivalents
-QUOTA_FALLBACK: dict[str, str] = {
-    "claude-sdk/claude-opus-4-6": "bedrock/us.anthropic.claude-opus-4-6-v1",
-    "codex/gpt-5.3-codex-spark": "zen/gpt-5.3-codex-spark",
-}
+# Routing is explicit. Exhaustion must not silently switch provider or spend quota.
+QUOTA_FALLBACK: dict[str, str] = {}
+MODEL_FALLBACK: dict[str, str] = {}
 
 
 def _quota_fallback_spec(model_spec: str) -> str | None:
-    return QUOTA_FALLBACK.get(model_spec)
-
-
-# Model-to-model fallback for subscription-backed Codex models. gpt-5.6-sol
-# is useful on hard CTF tasks, but can reject cyber tasks or hit usage limits;
-# fall back to the more permissive/available gpt-5.5 automatically.
-MODEL_FALLBACK: dict[str, str] = {
-    "codex/gpt-5.6-sol": "codex/gpt-5.5",
-}
-
-MODEL_FALLBACK_KEYWORDS = (
-    "flagged for possible cybersecurity risk",
-    "trusted access for cyber",
-    "cybersecurity risk",
-    "usage limit",
-    "quota",
-    "rate limit",
-    "capacity",
-    "unsupported service_tier",
-    "refus",
-    "can't assist",
-    "cannot assist",
-    "won't assist",
-    "not able to assist",
-    "not help with",
-    "policy",
-)
+    return None
 
 
 def _model_fallback_spec(model_spec: str, result: SolverResult) -> str | None:
-    """Return a replacement model for refusal/quota-style model failures."""
-    fallback = MODEL_FALLBACK.get(model_spec)
-    if not fallback:
-        return None
-    if result.status == QUOTA_ERROR:
-        return fallback
-    if result.status not in (ERROR, GAVE_UP):
-        return None
-    text = (result.findings_summary or "").casefold()
-    if any(keyword in text for keyword in MODEL_FALLBACK_KEYWORDS):
-        return fallback
     return None
 
 
@@ -358,6 +319,9 @@ class ChallengeSwarm:
                 break
 
             if result.status in (GAVE_UP, ERROR):
+                if bump_count >= getattr(self.settings, "solver_max_bumps", 2):
+                    logger.info("Solver retry budget exhausted for %s", current_model_spec)
+                    break
                 if result.step_count == 0 and result.cost_usd == 0:
                     logger.warning(
                         f"[{self.meta.name}/{current_model_spec}] Broken (0 steps, $0) — not bumping"

@@ -1,229 +1,88 @@
-# CTF Agent
+# Magpie + CTF Agent
 
-Autonomous CTF (Capture The Flag) solver that races multiple AI models against challenges in parallel. Built in a weekend, we used it to solve all 52/52 challenges and win **1st place at BSidesSF 2026 CTF**.
+让 zcode、dsh 或其他具备终端能力的 agent 负责规划与验收，由 Magpie 免费池执行 CTF 单题任务。
+这是 [Veria Labs ctf-agent](https://github.com/verialabs/ctf-agent) 的工作流分支；保留 MIT 许可证与上游署名。[上游介绍](docs/UPSTREAM_README.md) 中的比赛成绩属于上游，旧默认值不代表本分支。
 
-Built by [Veria Labs](https://verialabs.com), founded by members of [.;,;.](https://ctftime.org/team/222911) (smiley), the [#1 US CTF team on CTFTime in 2024 and 2025](https://ctftime.org/stats/2024/US). We build AI agents that find and exploit real security vulnerabilities for large enterprises.
+## 给 agent 的入口
 
-## Results
-
-| Competition | Challenges Solved | Result |
-|-------------|:-:|--------|
-| **BSidesSF 2026** | 52/52 (100%) | **1st place ($1,500)** |
-
-The agent solves challenges across all categories — pwn, rev, crypto, forensics, web, and misc.
-
-## How It Works
-
-A **coordinator** LLM manages the competition while **solver swarms** attack individual challenges. Each swarm runs multiple models simultaneously — the first to find the flag wins.
-
-```
-                        +-----------------+
-                        |  CTFd Platform  |
-                        +--------+--------+
-                                 |
-                        +--------v--------+
-                        |  Poller (5s)    |
-                        +--------+--------+
-                                 |
-                        +--------v--------+
-                        | Coordinator LLM |
-                        | (Claude/Codex)  |
-                        +--------+--------+
-                                 |
-              +------------------+------------------+
-              |                  |                  |
-     +--------v--------+ +------v---------+ +------v---------+
-     | Swarm:          | | Swarm:         | | Swarm:         |
-     | challenge-1     | | challenge-2    | | challenge-N    |
-     |                 | |                | |                |
-     |  Opus (med)     | |  Opus (med)    | |                |
-     |  Opus (max)     | |  Opus (max)    | |     ...        |
-     |  GPT-5.4        | |  GPT-5.4       | |                |
-     |  GPT-5.4-mini   | |  GPT-5.4-mini  | |                |
-     |  GPT-5.3-codex  | |  GPT-5.3-codex | |                |
-     +--------+--------+ +--------+-------+ +----------------+
-              |                    |
-     +--------v--------+  +-------v--------+
-     | Docker Sandbox  |  | Docker Sandbox |
-     | (isolated)      |  | (isolated)     |
-     |                 |  |                |
-     | pwntools, r2,   |  | pwntools, r2,  |
-     | gdb, python...  |  | gdb, python... |
-     +-----------------+  +----------------+
-```
-
-Each solver runs in an isolated Docker container with CTF tools pre-installed. Solvers never give up — they keep trying different approaches until the flag is found.
-
-## Quick Start
-
-```bash
-# Install
-uv sync
-
-# Build sandbox image
-docker build -f sandbox/Dockerfile.sandbox -t ctf-sandbox .
-
-# Configure credentials
-cp .env.example .env
-# Edit .env with your API keys and CTFd token
-
-# Run against a CTFd instance
-uv run ctf-solve \
-  --ctfd-url https://ctf.example.com \
-  --ctfd-token ctfd_your_token \
-  --challenges-dir challenges \
-  --max-challenges 10 \
-  -v
-```
-
-## Coordinator Backends
-
-```bash
-# Claude SDK coordinator (default)
-uv run ctf-solve --coordinator claude ...
-
-# Codex coordinator (GPT-5.6 Sol via JSON-RPC)
-uv run ctf-solve --coordinator codex ...
-```
-
-## Solver Models
-
-Default model lineup (configurable in `backend/models.py`):
-
-| Model | Provider | Notes |
-|-------|----------|-------|
-| Claude Opus 4.6 (medium) | Claude SDK | Balanced speed/quality |
-| Claude Opus 4.6 (max) | Claude SDK | Deep reasoning |
-| GPT-5.6 Sol | Codex | Default Codex coordinator and solver |
-| GPT-5.3-codex | Codex | Reasoning model (xhigh effort) |
-
-DeepSeek's OpenAI-compatible API is also supported. For a lean setup that uses a
-ChatGPT-authenticated Codex coordinator and two DeepSeek solvers per challenge:
-
-```bash
-export DEEPSEEK_API_KEY=your_key_here
-uv run ctf-solve \
-  --coordinator codex \
-  --max-challenges 3 \
-  --models deepseek/deepseek-v4-pro \
-  --models deepseek/deepseek-flash \
-  ...
-```
-
-DeepSeek thinking models are sent `tool_choice=auto`; this keeps bash, file, and
-submission tools available without using the unsupported `required` mode.
-
-Increase `--max-challenges` to 5 after validating local Docker and API capacity.
-
-## Sandbox Tooling
-
-Each solver gets an isolated Docker container pre-loaded with CTF tools:
-
-| Category | Tools |
-|----------|-------|
-| **Binary** | radare2, GDB, objdump, binwalk, strings, readelf |
-| **Pwn** | pwntools, ROPgadget, angr, unicorn, capstone |
-| **Crypto** | SageMath, RsaCtfTool, z3, gmpy2, pycryptodome, cado-nfs |
-| **Forensics** | volatility3, Sleuthkit (mmls/fls/icat), foremost, exiftool |
-| **Stego** | steghide, stegseek, zsteg, ImageMagick, tesseract OCR |
-| **Web** | curl, nmap, Python requests, flask |
-| **Misc** | ffmpeg, sox, Pillow, numpy, scipy, PyTorch, podman |
-
-## Features
-
-- **Multi-model racing** — multiple AI models attack each challenge simultaneously
-- **Auto-spawn** — new challenges detected and attacked automatically
-- **Dynamic task pool** — priority queue backfills reusable challenge slots as work finishes
-- **Task registry** — category, workspace path, attempts, and lifecycle state are visible centrally
-- **Typed event bus** — queue/start/help/block/solve transitions are delivered consistently
-- **Coordinator LLM** — reads solver traces, crafts targeted technical guidance
-- **Cross-solver insights** — findings shared between models via message bus
-- **Flag guardrails** — local placeholder/control-character checks plus deduplicated CTFd verification
-- **Docker sandboxes** — isolated containers with full CTF tooling
-- **Operator messaging** — send hints to running solvers mid-competition
-- **Automatic write-ups** — confirmed solves create a redacted Markdown WP and preserve text solution files
-
-## Automatic Write-ups
-
-Write-up generation is enabled by default. After a solver confirms a flag, the agent writes:
+先读 [AGENTS.md](AGENTS.md)，再读 [接入与交接协议](docs/AGENT_HANDOFF.md)。通过 shell 调用本项目即可，不要求 zcode/dsh 实现 Codex app-server 协议。
 
 ```text
-writeups/<category>/<challenge>/README.md
-writeups/<category>/<challenge>/artifacts/...
+外层 agent 规划/复核
+  -> ctf-doctor 预检
+  -> metadata.yml + distfiles/ 题目目录
+  -> 只读分类、2–4 个证据支持的假设
+  -> ctf-solve --challenge ... --no-submit
+  -> Magpie group/free-workers -> Docker 单题执行
+  -> 复核候选与复现脚本
+  -> 按任务要求提交，保存 write-up 和交接记录
 ```
 
-The default WP contains challenge metadata, participating and winning models, solver findings,
-reproduction guidance, verification state, flag, and sanitized text files from the winning
-workspace. Common API key, token, cookie, and password forms are redacted.
+## 首次启动
 
-Use `--writeups-dir PATH` to select another output directory or `--no-writeups` to disable it.
-
-## Configuration
-
-Copy `.env.example` to `.env` and fill in your keys:
+需要 Python >=3.14、uv、Docker Linux 容器，以及运行中的 Magpie。网关配置见 [MAGPIE_SETUP](docs/MAGPIE_SETUP.md)。所有命令从仓库根目录运行；`.env` 按当前工作目录读取。
 
 ```bash
+uv sync --locked
+# Linux/macOS 用 cp；PowerShell 用 Copy-Item
 cp .env.example .env
+# 按自己的网关填写 MAGPIE_BASE_URL / MAGPIE_API_KEY
+docker build -f sandbox/Dockerfile.sandbox-lite -t ctf-sandbox .
+uv run --locked ctf-doctor --json
+uv run --locked ctf-doctor --live --json
+uv run --locked ctf-solve --challenge examples/hello-ctf --models magpie/group/free-workers --no-submit --no-writeups
 ```
 
-```env
-CTFD_URL=https://ctf.example.com
-CTFD_TOKEN=ctfd_your_token
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-GEMINI_API_KEY=...
+示例题只验证管线，不代表真实题目的解题能力。`ctf-doctor --live` 只查询模型列表和 Docker 状态，不调用模型推理。
+离线预检通过不等于服务可用；模型出现在列表中也不保证当前额度和工具调用都正常。
+
+## 默认行为与资源上限
+
+| 项目 | 本分支行为 |
+|---|---|
+| Solver | `magpie/group/free-workers` |
+| 总控 | 单题不启动内建总控；全赛显式选 `--coordinator claude` 或 `codex` |
+| 并发 | 全赛默认 3 个题目槽；独立单题由外层限制为 3 个进程 |
+| 输出预算 | `MAGPIE_MAX_TOKENS=8192`，每次响应 |
+| 请求预算 | `SOLVER_REQUEST_LIMIT=100`，每个 Pydantic solver run |
+| 续跑 | `SOLVER_MAX_BUMPS=2`，初始一轮 + 最多两轮续跑；不是全赛总预算 |
+| 兜底 | 不自动更换 provider 或模型，额度失败交回外层 agent |
+| 结果 | `--no-submit` 显示未提交候选；无结果 exit 2；异常 exit 非零 |
+| 容器 | 启动新任务不清理其他任务的容器；结束释放自己的容器 |
+| 费用 | 免费组按 0 估算，其他 Magpie 路由标 unknown |
+
+免费组成员必须在 Magpie 中核对。`$0` 是本地 solver 估算，不是账单证明；内建 Claude/Codex 总控用量不含在该估算内。
+明确配置付费模型仍可调用它们。`--race-models` 增加每题 solver 数量，外层须按实际模型数计算并发。
+
+## 真实题目与提交
+
+```bash
+uv run --locked ctf-solve --challenge challenges/my-task --models magpie/group/free-workers --no-submit
 ```
 
-All settings can also be passed as environment variables or CLI flags.
+确认候选和复现脚本后，需要提交时在 `.env` 填写对应平台参数，按任务要求去掉 `--no-submit`。
+默认 write-up 在 `writeups/`，日志在 `logs/`。无提交模式的 write-up 须按“候选”理解，以平台响应作最终确认。
+题目目录、凭据、日志和运行中的 gateway 数据不随代码发布。
 
-### Ret2Shell platforms
+## 可选全赛模式
 
-Ret2Shell uses a different API from CTFd. Select its adapter and game explicitly:
+外层 agent 负责规划时用单题模式即可。需要原有全赛调度器时：
 
-```env
-CTF_PLATFORM=ret2shell
-CTFD_URL=https://ctf.example.com
-RET2SHELL_TOKEN=current_bearer_session_token
-RET2SHELL_GAME_ID=37
-RET2SHELL_AUTO_START_INSTANCES=true
+```bash
+uv run --locked ctf-solve --coordinator codex --max-challenges 3 --models magpie/group/free-workers --no-submit
 ```
 
-The same values can be selected with `--platform ret2shell --game-id 37`. The adapter
-uses `/api/game/...`, downloads attachments, starts a challenge instance when required,
-polls asynchronous flag submissions, handles `Set-Token` rotation in memory, and keeps
-the existing coordinator/swarm interface unchanged.
+此路径额外依赖已配置的 Codex CLI/账号和比赛平台。本次未做完整线上比赛验收。
+同时配置 `magpie/group/auto-beam-free` 时类别偏好才参与两组分流；默认仅用一个免费池。
 
-### CTF+ platforms
+## 开发验证
 
-CTF+ (`ctfplus.cn`) uses JSON endpoints and a browser token named `mario-token`.
-Select the adapter and competition explicitly:
-
-```env
-CTF_PLATFORM=ctfplus
-CTFD_URL=https://www.ctfplus.cn
-CTFPLUS_TOKEN=current_mario_token
-CTFPLUS_COMPETITION_ID=2105658865197518848
+```bash
+uv sync --locked
+uv run --locked pytest -q tests -p no:cacheprovider --import-mode=importlib
+uv run --locked ruff check backend tests
+uv run --locked ctf-doctor --json
 ```
 
-The same values can be selected with
-`--platform ctfplus --ctfd-url https://www.ctfplus.cn --competition-id 2105658865197518848`.
-The adapter polls CTF+ problem lists, downloads visible attachments, starts dynamic
-containers when requested, submits flags through `challenge/submit`, and keeps the
-existing coordinator/swarm interface unchanged.
-
-## Requirements
-
-- Python 3.14+
-- Docker
-- API credentials for at least one solver provider (Anthropic, OpenAI, Google, DeepSeek)
-- A ChatGPT or API-key login for Codex-backed solvers/coordinators
-- `codex` CLI (for Codex solver/coordinator)
-- `claude` CLI (bundled with claude-agent-sdk)
-
-The Codex executable is resolved to an absolute path before launch, including the
-versioned location used by Codex Desktop on Windows. Set `CODEX_EXECUTABLE` to an
-explicit executable path when using a custom installation.
-
-## Acknowledgements
-
-- [es3n1n/Eruditus](https://github.com/es3n1n/Eruditus) — CTFd interaction and HTML helpers in `pull_challenges.py`
+CI 在 Linux 和 Windows 执行离线测试与 lint。模型推理、Docker 镜像构建和比赛提交需单独验证。
+旧比赛专用 PowerShell 脚本保留作历史参考，新环境请使用通用入口。

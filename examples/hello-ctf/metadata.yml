@@ -1,0 +1,4 @@
+name: hello-ctf
+category: crypto
+value: 0
+description: Decode the Base64 text in distfiles/payload.txt. The flag format is demo{...}. This is a local pipeline smoke test.

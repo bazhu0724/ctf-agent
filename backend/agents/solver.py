@@ -170,7 +170,7 @@ class Solver:
         )
 
         model = resolve_model(self.model_spec, self.settings)
-        model_settings = resolve_model_settings(self.model_spec)
+        model_settings = resolve_model_settings(self.model_spec, self.settings)
         raw_toolset = _build_toolset(self.deps)
         toolset = TracingToolset(
             wrapped=raw_toolset,
@@ -204,7 +204,9 @@ class Solver:
                 "Solve this CTF challenge." if not self._messages else "Continue solving.",
                 deps=self.deps,
                 message_history=self._messages if self._messages else None,
-                usage_limits=UsageLimits(request_limit=None),
+                usage_limits=UsageLimits(
+                    request_limit=getattr(self.settings, "solver_request_limit", 100),
+                ),
             )
 
             duration = time.monotonic() - t0

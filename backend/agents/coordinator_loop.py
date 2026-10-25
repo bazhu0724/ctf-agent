@@ -369,7 +369,7 @@ async def _start_msg_server(deps: CoordinatorDeps, port: int = 0) -> asyncio.Ser
 
             if method == "GET" and target.split("?", 1)[0] == "/status":
                 resp = json.dumps(_status_payload(deps), ensure_ascii=False, indent=2)
-                writer.write(f"HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {len(resp.encode('utf-8'))}\r\n\r\n{resp}".encode("utf-8"))
+                writer.write(f"HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {len(resp.encode())}\r\n\r\n{resp}".encode())
             elif method == "POST" and content_length > 0:
                 body = await asyncio.wait_for(reader.read(content_length), timeout=5)
                 try:

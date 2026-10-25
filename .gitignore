@@ -19,7 +19,6 @@ build/
 .venv/
 .mypy_cache/
 .ruff_cache/
-uv.lock
 
 # Runtime
 workspace/
@@ -30,3 +29,8 @@ artifacts/
 writeups/
 *.png
 runtime_pkgs/
+
+# Local gateway state and verification scratch
+magpie-data/
+.pytest_cache/
+work/

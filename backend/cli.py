@@ -56,13 +56,13 @@ def _setup_logging(verbose: bool = False) -> None:
 @click.option(
     "--coordinator-model",
     default=None,
-    help="Coordinator model override (Codex default: gpt-5.5)",
+    help="Coordinator model override (Codex default: codex/gpt-6-astra)",
 )
-@click.option("--coordinator", default="claude", type=click.Choice(["claude", "codex"]), help="Coordinator backend")
+@click.option("--coordinator", default=None, type=click.Choice(["claude", "codex"]), help="Explicit backend for a full competition; not used for --challenge")
 @click.option(
     "--max-challenges",
-    default=10,
-    type=int,
+    default=3,
+    type=click.IntRange(min=1),
     help="Reusable concurrent challenge slots; queued challenges backfill freed slots",
 )
 @click.option("--msg-port", default=0, type=int, help="Operator message port (0 = auto)")
@@ -86,7 +86,7 @@ def main(
     challenges_dir: str,
     no_submit: bool,
     coordinator_model: str | None,
-    coordinator: str,
+    coordinator: str | None,
     max_challenges: int,
     msg_port: int,
     writeups_dir: str,
@@ -98,6 +98,12 @@ def main(
     Run without --challenge to start the full coordinator (Ctrl+C to stop).
     """
     _setup_logging(verbose)
+
+    if not challenge and coordinator is None:
+        raise click.UsageError(
+            "Choose --challenge PATH for an external agent, or explicitly select "
+            "--coordinator claude/codex for a full competition."
+        )
 
     settings = Settings(sandbox_image=image)
     if ctfd_url:
@@ -152,15 +158,15 @@ async def _run_single(
     max_challenges: int,
 ) -> None:
     """Run a single challenge with a swarm."""
+    from backend.agents.coordinator_core import can_start_without_endpoint
     from backend.agents.swarm import ChallengeSwarm
-    from backend.cost_tracker import CostTracker
+    from backend.cost_tracker import CostTracker, format_cost
     from backend.prompts import ChallengeMeta
     from backend.ret2shell import create_competition_client
-    from backend.sandbox import cleanup_orphan_containers, configure_semaphore
+    from backend.sandbox import configure_semaphore
 
-    max_containers = max(1, len(model_specs))
+    max_containers = min(max_challenges, max(1, len(model_specs)))
     configure_semaphore(max_containers)
-    await cleanup_orphan_containers()
 
     challenge_path = Path(challenge_dir)
     meta_path = challenge_path / "metadata.yml"
@@ -170,8 +176,16 @@ async def _run_single(
 
     meta = ChallengeMeta.from_yaml(meta_path)
     ctfd = create_competition_client(settings)
-    if not meta.connection_info and hasattr(ctfd, "get_connection_info"):
-        meta.connection_info = await ctfd.get_connection_info(meta.name)
+    # Offline challenges (forensics, crypto, rev, or anything with distfiles) are
+    # solvable without the competition platform. Only ask it for an instance
+    # endpoint when the challenge actually needs one, and never let a platform
+    # outage abort a local run.
+    if not meta.connection_info and hasattr(ctfd, "get_connection_info") and not can_start_without_endpoint(meta, str(challenge_path)):
+        try:
+            meta.connection_info = await ctfd.get_connection_info(meta.name)
+        except Exception as exc:
+            console.print(f"[yellow]Platform lookup failed, continuing offline:[/yellow] {type(exc).__name__}")
+            meta.connection_info = ""
         if meta.connection_info:
             console.print(f"[green]Instance:[/green] {meta.connection_info}")
         else:
@@ -195,14 +209,17 @@ async def _run_single(
         result = await swarm.run()
         from backend.solver_base import FLAG_FOUND
         if result and result.status == FLAG_FOUND:
-            console.print(f"\n[bold green]FLAG FOUND:[/bold green] {result.flag}")
+            label = "FLAG CANDIDATE (not submitted)" if no_submit else "FLAG FOUND"
+            console.print(f"\n[bold green]{label}:[/bold green] {result.flag}")
         else:
             console.print("\n[bold red]No flag found.[/bold red]")
 
         console.print("\n[bold]Cost Summary:[/bold]")
         for agent_name in cost_tracker.by_agent:
             console.print(f"  {agent_name}: {cost_tracker.format_usage(agent_name)}")
-        console.print(f"  [bold]Total: ${cost_tracker.total_cost_usd:.2f}[/bold]")
+        console.print(f"  [bold]Total estimate: {format_cost(cost_tracker.total_cost_usd)}[/bold]")
+        if not result or result.status != FLAG_FOUND:
+            raise click.exceptions.Exit(2)
     finally:
         await ctfd.close()
 
@@ -219,12 +236,11 @@ async def _run_coordinator(
     allowed_categories: set[str] | None = None,
 ) -> None:
     """Run the full coordinator (continuous until Ctrl+C)."""
-    from backend.sandbox import cleanup_orphan_containers, configure_semaphore
+    from backend.sandbox import configure_semaphore
 
     split_models = getattr(settings, "split_models_across_challenges", True)
     max_containers = max_challenges if split_models else max_challenges * len(model_specs)
     configure_semaphore(max_containers)
-    await cleanup_orphan_containers()
     console.print(f"[bold]Starting coordinator ({coordinator_backend}, Ctrl+C to stop)...[/bold]\n")
 
     if coordinator_backend == "codex":
@@ -253,7 +269,7 @@ async def _run_coordinator(
     console.print("\n[bold]Final Results:[/bold]")
     for challenge, data in results.get("results", {}).items():
         console.print(f"  {challenge}: {data.get('flag', 'no flag')}")
-    console.print(f"\n[bold]Total cost: ${results.get('total_cost_usd', 0):.2f}[/bold]")
+    console.print(f"\n[bold]Solver cost estimate (coordinator excluded): ${results.get('total_cost_usd', 0):.2f}[/bold]")
 
 
 @click.command()

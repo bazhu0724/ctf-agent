@@ -1,4 +1,4 @@
-"""Model resolution — Bedrock, Azure OpenAI, Zen, Google AI Studio."""
+"""Model resolution — Bedrock, Azure OpenAI, Zen, Magpie, Google AI Studio."""
 
 from __future__ import annotations
 
@@ -19,16 +19,18 @@ from pydantic_ai.settings import ModelSettings
 if TYPE_CHECKING:
     from backend.config import Settings
 
-# Default model specs — claude-sdk and codex providers use the new solver backends
+# Default model specs — claude-sdk and codex providers use the new solver backends.
+# The default route is a locally configured free pool. Verify its members in Magpie.
 DEFAULT_MODELS: list[str] = [
-    "codex/gpt-5.5",
-    "deepseek/deepseek-flash",
+    "magpie/group/free-workers",
 ]
 
 # Context window sizes (tokens)
 CONTEXT_WINDOWS: dict[str, int] = {
     "us.anthropic.claude-opus-4-6-v1": 1_000_000,
     "claude-opus-4-6": 1_000_000,
+    "opencode-zen/deepseek-v4.1-flash-free": 1_000_000,
+    "opencode-zen/glm-5.3-flash-free": 1_000_000,
     "gpt-5.5": 1_000_000,
     "gpt-5.6-sol": 1_000_000,
     "gpt-5.3-codex": 1_000_000,
@@ -85,6 +87,17 @@ def resolve_model(spec: str, settings: Settings) -> Model:
                     api_key=settings.opencode_zen_api_key,
                 ),
             )
+        case "magpie":
+            # Local gateway. Model IDs keep their own slashes, e.g.
+            # magpie/group/free-workers -> model_id "group/free-workers".
+            return OpenAIChatModel(
+                model_id,
+                provider=OpenAIProvider(
+                    base_url=settings.magpie_base_url,
+                    api_key=settings.magpie_api_key,
+                ),
+                profile=OpenAIModelProfile(openai_supports_tool_choice_required=False),
+            )
         case "deepseek":
             if not settings.deepseek_api_key:
                 raise ValueError("DEEPSEEK_API_KEY is required for deepseek/* models")
@@ -112,7 +125,7 @@ def resolve_model(spec: str, settings: Settings) -> Model:
             raise ValueError(f"Unknown provider: {provider}")
 
 
-def resolve_model_settings(spec: str) -> ModelSettings:
+def resolve_model_settings(spec: str, settings: Settings | None = None) -> ModelSettings:
     """Get provider-specific model settings with caching enabled."""
     provider = spec.split("/", 1)[0]
     match provider:
@@ -123,6 +136,14 @@ def resolve_model_settings(spec: str) -> ModelSettings:
                 bedrock_cache_tool_definitions=True,
                 bedrock_cache_messages=True,
             )
+        case "magpie":
+            result = OpenAIChatModelSettings(
+                max_tokens=getattr(settings, "magpie_max_tokens", 8192),
+            )
+            effort = effort_from_spec(spec)
+            if effort:
+                result["openai_reasoning_effort"] = effort
+            return result
         case "azure" | "zen" | "deepseek":
             # These providers use OpenAI-compatible chat completions. Prompt caching
             # is automatic, no explicit config needed. Set max_tokens to avoid
@@ -144,6 +165,14 @@ def resolve_model_settings(spec: str) -> ModelSettings:
 
 def model_id_from_spec(spec: str) -> str:
     """Extract just the model ID from a spec (strips effort suffix)."""
+    provider, _, rest = spec.partition("/")
+    if provider == "magpie" and rest:
+        # Magpie model IDs contain slashes (group/free-workers). Only a trailing
+        # effort segment is stripped, and only when something precedes it.
+        parts = rest.split("/")
+        if len(parts) > 1 and parts[-1] in ("low", "medium", "high", "max"):
+            parts = parts[:-1]
+        return "/".join(parts)
     parts = spec.split("/")
     return parts[1] if len(parts) >= 2 else spec
 
@@ -156,8 +185,10 @@ def provider_from_spec(spec: str) -> str:
 def effort_from_spec(spec: str) -> str | None:
     """Extract effort level from a spec like 'claude-sdk/claude-opus-4-6/max'."""
     parts = spec.split("/")
-    if len(parts) >= 3 and parts[2] in ("low", "medium", "high", "max"):
-        return parts[2]
+    if len(parts) >= 3 and parts[-1] in ("low", "medium", "high", "max"):
+        # For magpie specs the model ID itself may contain slashes, so the effort
+        # is always the final segment.
+        return parts[-1] if spec.startswith("magpie/") else parts[2]
     return None
 
 

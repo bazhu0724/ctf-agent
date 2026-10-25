@@ -25,8 +25,7 @@ class ChallengeMeta:
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> ChallengeMeta:
-        with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+        data = yaml.safe_load(_read_text(path)) or {}
         return cls(
             name=data.get("name", "Unknown"),
             category=data.get("category", ""),
@@ -37,6 +36,22 @@ class ChallengeMeta:
             hints=data.get("hints", []),
             solves=data.get("solves", 0),
         )
+
+
+def _read_text(path: str | Path) -> str:
+    """Read challenge metadata written by any platform or editor.
+
+    Scraped metadata.yml files are frequently GBK/cp1252 on Chinese Windows
+    hosts. Decode strictly as UTF-8 first, then fall back so a stray byte in a
+    description cannot abort the whole run.
+    """
+    raw = Path(path).read_bytes()
+    for encoding in ("utf-8-sig", "gb18030", "cp1252"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
 
 
 def list_distfiles(challenge_dir: str) -> list[str]:
